@@ -1,14 +1,16 @@
 {
-  "name": "GymFlow Pro v2",
+  "name": "GymFlow Pro v3",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio con sesión activa, cargas, medidas, evolución corporal y exportación CSV.",
+  "description": "Seguimiento de gimnasio con sesión activa, cargas, medidas, progreso corporal, PRs, exportación e instalación PWA.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#f5f7fb",
-  "theme_color": "#111827",
+  "theme_color": "#6d5efc",
   "lang": "es-ES",
   "orientation": "portrait-primary",
+  "categories": ["health", "sports", "productivity"],
   "icons": [
     {
       "src": "icons/icon-192.png",

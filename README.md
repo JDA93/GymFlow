@@ -1,16 +1,15 @@
-# GymFlow Pro v2
+# GymFlow Pro v3
 
-Versión mejorada de la PWA de seguimiento de gimnasio, lista para subir a GitHub y desplegar.
+Versión auditada y corregida de la PWA de seguimiento de gimnasio.
 
-## Qué cambia en esta versión
-- KPI extra con **e1RM top**
-- Exportación en **JSON y CSV**
-- Estado **online/offline** visible
-- Aviso cuando hay una **nueva versión** de la app
-- Filtro y **ordenación** del historial de entrenos
-- Sugerencia de progresión de carga en la **sesión activa**
-- Mejor estrategia del service worker para documentos HTML
-- Estructura correcta de iconos en carpeta `icons/`
+## Qué mejora esta versión
+- Pantalla **Hoy** más accionable
+- **Sesión activa** más clara y rápida
+- Registro rápido con bloque de **datos opcionales**
+- Mejor lectura de **PRs, volumen, e1RM y tendencias**
+- Mejor estado de instalación **PWA**
+- Service worker y manifest más robustos
+- Estructura final preparada para desplegar en GitHub Pages, Netlify o Vercel
 
 ## Archivos
 - `index.html`
@@ -22,21 +21,14 @@ Versión mejorada de la PWA de seguimiento de gimnasio, lista para subir a GitHu
 - `icons/icon-512.png`
 
 ## Cómo probarla en local
-### Opción A: Python
 ```bash
-cd gymflow-pro-v2
+cd gymflow-pro-v3
 python -m http.server 4173
 ```
 
 Después abre `http://localhost:4173`.
 
-### Opción B: VS Code
-Abre la carpeta y ejecuta Live Server.
-
-## Cómo desplegarla
-Puedes subir la carpeta a GitHub Pages, Netlify o Vercel.
-
-## Cómo instalarla
+## Instalación PWA
 ### Android / Chrome
 - Abre la URL publicada
 - Espera a que aparezca el botón `Instalar app` o usa el menú del navegador

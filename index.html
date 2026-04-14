@@ -3,21 +3,24 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#111827" />
-    <meta name="description" content="GymFlow Pro v2: seguimiento de gimnasio con sesión activa, progreso, medidas, objetivos, exportación CSV y mejoras PWA." />
+    <meta name="theme-color" content="#6d5efc" />
+    <meta name="description" content="GymFlow Pro v3: seguimiento de gimnasio con sesión activa, progreso, medidas, objetivos, PRs, exportación y mejoras PWA reales." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GymFlow" />
     <link rel="manifest" href="manifest.webmanifest" />
-    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro v2</title>
+    <title>GymFlow Pro v3</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="appShell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">PWA instalable · offline · sesión activa · CSV</p>
-          <h1>GymFlow Pro v2</h1>
-          <p class="subtitle">Versión más pulida para usar de verdad en móvil: mejor PWA, exportación CSV, sugerencias de progreso, filtros, métricas más útiles y control de versión offline.</p>
+          <p class="eyebrow">PWA instalable · offline · foco en sesión · exportación</p>
+          <h1>GymFlow Pro v3</h1>
+          <p class="subtitle">Versión auditada con flujo más rápido, pantalla de hoy más útil, sesión activa más clara y mejor estado PWA.</p>
         </div>
         <div class="topbar-actions">
           <span id="networkBadge" class="status-badge">Online</span>
@@ -32,14 +35,15 @@
         </div>
       </header>
 
-      <section class="hero-card">
+      <section class="hero-card hero-card--highlight">
         <div>
-          <span class="pill">Datos locales + backup</span>
-          <h2>Tu tracker de gimnasio listo para móvil</h2>
-          <p>Todo se guarda en tu dispositivo, con backup JSON, exportación CSV y modo offline. La sesión activa ahora da mejor contexto con recomendación de carga, e1RM y estado de instalación PWA más claro.</p>
+          <span class="pill">Todo en local + backup manual</span>
+          <h2>Hoy entrenas más rápido</h2>
+          <p>La pantalla inicial ahora prioriza tu próxima acción, resume el último estado real y te deja arrancar una rutina en pocos toques.</p>
         </div>
         <div class="hero-actions">
           <button id="startTodayBtn">Entrenar ahora</button>
+          <button id="goToSessionBtn" class="ghost">Abrir sesión</button>
           <button id="loadDemoBtn" class="ghost">Cargar demo</button>
           <button id="resetBtn" class="danger">Reiniciar datos</button>
         </div>
@@ -82,7 +86,7 @@
       </section>
 
       <nav class="tabbar" aria-label="Secciones">
-        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab active" data-tab="dashboard">Hoy</button>
         <button class="tab" data-tab="session">Sesión</button>
         <button class="tab" data-tab="routines">Rutinas</button>
         <button class="tab" data-tab="logs">Entrenos</button>
@@ -95,11 +99,33 @@
       <main class="layout">
         <section id="dashboard" class="tab-panel active">
           <div class="panel-grid two">
+            <article class="card card--emphasis">
+              <div class="card-head">
+                <div>
+                  <h3>Tu foco de hoy</h3>
+                  <p>Lo más útil para decidir tu siguiente acción.</p>
+                </div>
+              </div>
+              <div id="todayFocus" class="list compact"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Sesión rápida</h3>
+                  <p>Accesos directos para no perder tiempo navegando.</p>
+                </div>
+              </div>
+              <div id="quickStartList" class="list compact"></div>
+            </article>
+          </div>
+
+          <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
                 <div>
                   <h3>Progresión de ejercicio</h3>
-                  <p>Peso, volumen y evolución real en tus últimos registros.</p>
+                  <p>Peso, volumen y evolución de tus últimos registros.</p>
                 </div>
                 <select id="dashboardExerciseSelect"></select>
               </div>
@@ -110,7 +136,7 @@
               <div class="card-head">
                 <div>
                   <h3>Evolución corporal</h3>
-                  <p>Mide el cambio real de las variables que te importan.</p>
+                  <p>Cambio real de las variables que te importan.</p>
                 </div>
                 <select id="dashboardMetricSelect">
                   <option value="bodyWeight">Peso</option>
@@ -131,32 +157,32 @@
             <article class="card">
               <div class="card-head">
                 <div>
-                  <h3>Tu foco de hoy</h3>
-                  <p>Lo más útil para decidir qué hacer ahora.</p>
+                  <h3>Últimos registros</h3>
+                  <p>Con e1RM estimado, volumen y notas rápidas.</p>
                 </div>
               </div>
-              <div id="todayFocus" class="list compact"></div>
+              <div id="recentLogs" class="list compact"></div>
             </article>
 
             <article class="card">
               <div class="card-head">
                 <div>
-                  <h3>Últimos registros</h3>
-                  <p>Ahora incluyen e1RM estimado y volumen.</p>
+                  <h3>Señales rápidas</h3>
+                  <p>Lectura simple de adherencia y progreso.</p>
                 </div>
               </div>
-              <div id="recentLogs" class="list compact"></div>
+              <div id="trendSummaryTop" class="list compact"></div>
             </article>
           </div>
         </section>
 
         <section id="session" class="tab-panel">
           <div class="panel-grid two session-grid">
-            <article class="card sticky-card">
+            <article class="card sticky-card card--emphasis">
               <div class="card-head">
                 <div>
                   <h3>Sesión activa</h3>
-                  <p>Entrena dentro de la app con último peso, sugerencia de siguiente carga, descanso y guardado seguro.</p>
+                  <p>Modo más directo: último peso, sugerencia de siguiente carga, descanso y progreso visual de la rutina.</p>
                 </div>
               </div>
 
@@ -188,7 +214,7 @@
               <div class="card-head">
                 <div>
                   <h3>Registrar rápido</h3>
-                  <p>También puedes guardar una serie o sesión manualmente.</p>
+                  <p>Modo básico arriba, detalles opcionales debajo. Menos fricción para usarla a diario.</p>
                 </div>
               </div>
 
@@ -202,12 +228,19 @@
                   <input name="sets" type="number" step="1" placeholder="Series" required />
                   <input name="reps" type="number" step="1" placeholder="Reps" required />
                 </div>
-                <div class="mini-grid">
-                  <input name="rpe" type="number" min="1" max="10" step="0.5" placeholder="RPE" />
-                  <input name="rest" type="number" min="0" step="15" placeholder="Descanso (seg)" />
-                  <input name="tempo" placeholder="Tempo (3-1-1)" />
-                </div>
-                <textarea name="notes" placeholder="Notas del entrenamiento"></textarea>
+
+                <details class="details-panel">
+                  <summary>Más datos opcionales</summary>
+                  <div class="form-grid details-body">
+                    <div class="mini-grid">
+                      <input name="rpe" type="number" min="1" max="10" step="0.5" placeholder="RPE" />
+                      <input name="rest" type="number" min="0" step="15" placeholder="Descanso (seg)" />
+                      <input name="tempo" placeholder="Tempo (3-1-1)" />
+                    </div>
+                    <textarea name="notes" placeholder="Notas del entrenamiento"></textarea>
+                  </div>
+                </details>
+
                 <div class="session-actions-row">
                   <button type="submit">Guardar registro</button>
                   <button type="button" id="cancelWorkoutEditBtn" class="ghost" hidden>Cancelar edición</button>
@@ -223,7 +256,7 @@
               <div class="card-head">
                 <div>
                   <h3>Nueva rutina</h3>
-                  <p>Crea planes reutilizables y luego lánzalos como sesión activa.</p>
+                  <p>Plantillas reutilizables con ejercicios, series, reps y descanso recomendado.</p>
                 </div>
               </div>
               <form id="routineForm" class="form-grid">
@@ -299,7 +332,7 @@
               <div class="card-head">
                 <div>
                   <h3>Registrar medidas</h3>
-                  <p>Lleva control físico con contexto, descanso y notas.</p>
+                  <p>Control físico con contexto, descanso, sueño y notas.</p>
                 </div>
               </div>
               <form id="measurementForm" class="form-grid">
@@ -369,7 +402,7 @@
               <div class="card-head">
                 <div>
                   <h3>Objetivos</h3>
-                  <p>Define metas de composición y básicos.</p>
+                  <p>Define metas de composición corporal y básicos.</p>
                 </div>
               </div>
               <form id="goalForm" class="form-grid">
