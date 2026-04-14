@@ -1,7 +1,7 @@
 {
-  "name": "GymFlow Pro",
+  "name": "GymFlow Pro v1.1",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio con sesión activa, cargas, medidas y evolución corporal.",
+  "description": "Seguimiento de gimnasio con sesión activa, cargas, medidas y evolución corporal, con mejoras de sesión y calidad de datos.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

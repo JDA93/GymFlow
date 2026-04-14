@@ -1,4 +1,4 @@
-const CACHE_NAME = "gymflow-pro-v2026-04-14";
+const CACHE_NAME = "gymflow-pro-v2026-04-14-1";
 const APP_ASSETS = [
   "./",
   "./index.html",

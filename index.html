@@ -8,7 +8,7 @@
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro</title>
+    <title>GymFlow Pro v1.1</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -16,8 +16,8 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">PWA instalable · offline · sesión activa</p>
-          <h1>GymFlow Pro</h1>
-          <p class="subtitle">Planifica, entrena, registra, analiza y compara tu progreso desde móvil u ordenador.</p>
+          <h1>GymFlow Pro v1.1</h1>
+          <p class="subtitle">Planifica, entrena, registra, analiza y compara tu progreso desde móvil u ordenador. Esta versión corrige métricas, evita duplicados y mejora el arranque de sesión.</p>
         </div>
         <div class="topbar-actions">
           <button id="installBtn" class="ghost" hidden>Instalar app</button>
@@ -45,9 +45,9 @@
 
       <section class="stats-grid">
         <article class="stat-card accent-card">
-          <p>Sesiones este mes</p>
+          <p>Días entrenados este mes</p>
           <strong id="statSessionsMonth">0</strong>
-          <span>Registros acumulados</span>
+          <span>Fechas únicas con entreno</span>
         </article>
         <article class="stat-card">
           <p>Racha real</p>
@@ -127,7 +127,7 @@
               <div class="card-head">
                 <div>
                   <h3>Últimos registros</h3>
-                  <p>Historial reciente con volumen y esfuerzo.</p>
+                  <p>Historial reciente con volumen y esfuerzo. Los guardados desde sesión se actualizan sin duplicarse.</p>
                 </div>
               </div>
               <div id="recentLogs" class="list compact"></div>
@@ -141,7 +141,7 @@
               <div class="card-head">
                 <div>
                   <h3>Sesión activa</h3>
-                  <p>Entrena dentro de la app con último peso, descanso y progreso.</p>
+                  <p>Entrena dentro de la app con último peso, descanso y guardado seguro sin duplicados.</p>
                 </div>
               </div>
 
@@ -163,7 +163,7 @@
                   <strong id="restTimerLabel">00:00</strong>
                 </div>
                 <div class="session-actions-row">
-                  <button id="startRestBtn" class="ghost small">Iniciar 90 s</button>
+                  <button id="startRestBtn" class="ghost small">Iniciar descanso</button>
                   <button id="stopRestBtn" class="ghost small">Parar</button>
                 </div>
               </div>
@@ -324,7 +324,7 @@
               <div class="card-head">
                 <div>
                   <h3>Volumen por ejercicio</h3>
-                  <p>Suma de kg × reps × series.</p>
+                  <p>Suma de kg × reps × series, agregada por ejercicio.</p>
                 </div>
               </div>
               <div id="volumeSummary" class="list compact"></div>
@@ -334,7 +334,7 @@
               <div class="card-head">
                 <div>
                   <h3>Tendencias útiles</h3>
-                  <p>Semanas activas, progreso y señales de estancamiento.</p>
+                  <p>Días entrenados, progreso y señales rápidas de estancamiento.</p>
                 </div>
               </div>
               <div id="trendSummary" class="list compact"></div>

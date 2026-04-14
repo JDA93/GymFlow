@@ -1,8 +1,10 @@
-const STORAGE_KEY = "gymflow-pro-v2";
+const STORAGE_KEY = "gymflow-pro-v3";
+const APP_SCHEMA_VERSION = 3;
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
 const demoData = {
+  schemaVersion: APP_SCHEMA_VERSION,
   routines: [
     {
       id: uid(),
@@ -77,6 +79,7 @@ const demoData = {
 
 function getDefaultState() {
   return {
+    schemaVersion: APP_SCHEMA_VERSION,
     routines: [],
     workoutLogs: [],
     measurements: [],
@@ -100,6 +103,99 @@ function getDefaultState() {
   };
 }
 
+function migrateState(rawState) {
+  const base = getDefaultState();
+  const input = rawState && typeof rawState === "object" ? rawState : {};
+  const migrated = {
+    ...base,
+    ...input,
+    schemaVersion: APP_SCHEMA_VERSION,
+    goals: { ...base.goals, ...(input.goals || {}) },
+    preferences: { ...base.preferences, ...(input.preferences || {}) }
+  };
+
+  migrated.routines = Array.isArray(input.routines)
+    ? input.routines.map((routine) => ({
+      id: routine?.id || uid(),
+      name: routine?.name || "",
+      day: routine?.day || "",
+      focus: routine?.focus || "",
+      notes: routine?.notes || "",
+      exercises: Array.isArray(routine?.exercises)
+        ? routine.exercises.map((exercise) => ({
+          id: exercise?.id || uid(),
+          name: exercise?.name || "",
+          sets: exercise?.sets ?? "",
+          reps: exercise?.reps ?? "",
+          rest: exercise?.rest ?? ""
+        }))
+        : []
+    }))
+    : [];
+
+  migrated.workoutLogs = Array.isArray(input.workoutLogs)
+    ? input.workoutLogs.map((entry) => ({
+      id: entry?.id || uid(),
+      date: entry?.date || today(),
+      routineId: entry?.routineId || "",
+      exercise: entry?.exercise || "",
+      weight: coerceNumber(entry?.weight),
+      sets: coerceNumber(entry?.sets),
+      reps: coerceNumber(entry?.reps),
+      rpe: coerceNumber(entry?.rpe),
+      rest: coerceNumber(entry?.rest),
+      tempo: entry?.tempo || "",
+      notes: entry?.notes || "",
+      sessionId: entry?.sessionId || "",
+      sessionEntryId: entry?.sessionEntryId || ""
+    }))
+    : [];
+
+  migrated.measurements = Array.isArray(input.measurements)
+    ? input.measurements.map((entry) => ({
+      id: entry?.id || uid(),
+      date: entry?.date || today(),
+      bodyWeight: coerceNumber(entry?.bodyWeight),
+      bodyFat: coerceNumber(entry?.bodyFat),
+      waist: coerceNumber(entry?.waist),
+      chest: coerceNumber(entry?.chest),
+      arm: coerceNumber(entry?.arm),
+      thigh: coerceNumber(entry?.thigh),
+      hips: coerceNumber(entry?.hips),
+      neck: coerceNumber(entry?.neck),
+      sleepHours: coerceNumber(entry?.sleepHours),
+      notes: entry?.notes || ""
+    }))
+    : [];
+
+  if (input.session?.routineId) {
+    migrated.session = {
+      id: input.session.id || uid(),
+      routineId: input.session.routineId,
+      date: input.session.date || today(),
+      entries: Array.isArray(input.session.entries)
+        ? input.session.entries.map((entry) => ({
+          id: entry?.id || uid(),
+          exercise: entry?.exercise || "",
+          targetSets: entry?.targetSets ?? "",
+          targetReps: entry?.targetReps ?? "",
+          targetRest: coerceNumber(entry?.targetRest) || migrated.preferences.defaultRestSeconds,
+          weight: entry?.weight ?? "",
+          sets: entry?.sets ?? "",
+          reps: entry?.reps ?? "",
+          rpe: entry?.rpe ?? "",
+          completed: Boolean(entry?.completed),
+          savedLogId: entry?.savedLogId || ""
+        }))
+        : []
+    };
+  } else {
+    migrated.session = null;
+  }
+
+  return migrated;
+}
+
 let state = loadState();
 let ui = {
   editingRoutineId: null,
@@ -116,18 +212,14 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return getDefaultState();
     const parsed = JSON.parse(raw);
-    return {
-      ...getDefaultState(),
-      ...parsed,
-      goals: { ...getDefaultState().goals, ...(parsed.goals || {}) },
-      preferences: { ...getDefaultState().preferences, ...(parsed.preferences || {}) }
-    };
+    return migrateState(parsed);
   } catch {
     return getDefaultState();
   }
 }
 
 function saveState() {
+  state.schemaVersion = APP_SCHEMA_VERSION;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
@@ -198,11 +290,15 @@ function getLatestMeasurement() {
 function getSessionsThisMonth() {
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
-  return state.workoutLogs.filter((entry) => entry.date.startsWith(ym)).length;
+  return new Set(state.workoutLogs.filter((entry) => entry.date.startsWith(ym)).map((entry) => entry.date)).size;
 }
 
 function getWorkoutDaysSorted() {
   return [...new Set(state.workoutLogs.map((entry) => entry.date))].sort();
+}
+
+function getWorkoutDayCount(entries) {
+  return new Set(entries.map((entry) => entry.date)).size;
 }
 
 function getDateDiffInDays(a, b) {
@@ -500,6 +596,8 @@ function renderRoutines() {
       persistAndRender("Rutina duplicada.");
     });
     div.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      const confirmed = window.confirm(`Se eliminará la rutina "${routine.name}" y no podrás recuperarla desde la app salvo por backup. ¿Continuar?`);
+      if (!confirmed) return;
       state.routines = state.routines.filter((r) => r.id !== routine.id);
       if (state.session?.routineId === routine.id) endSession(false);
       persistAndRender("Rutina eliminada.");
@@ -567,7 +665,17 @@ function renderWorkoutLogs() {
     div.querySelector('[data-action="copy"]').addEventListener("click", () => duplicateWorkout(entry.id));
     div.querySelector('[data-action="edit"]').addEventListener("click", () => editWorkout(entry.id));
     div.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      const confirmed = window.confirm(`Se eliminará el registro de ${entry.exercise} del ${formatDate(entry.date)}. ¿Continuar?`);
+      if (!confirmed) return;
       state.workoutLogs = state.workoutLogs.filter((log) => log.id !== entry.id);
+      if (state.session?.entries) {
+        state.session.entries.forEach((sessionEntry) => {
+          if (sessionEntry.savedLogId === entry.id) {
+            sessionEntry.savedLogId = "";
+            sessionEntry.completed = false;
+          }
+        });
+      }
       persistAndRender("Registro eliminado.");
     });
     list.appendChild(div);
@@ -652,6 +760,8 @@ function renderMeasurements() {
     `;
     div.querySelector('[data-action="edit"]').addEventListener("click", () => editMeasurement(entry.id));
     div.querySelector('[data-action="delete"]').addEventListener("click", () => {
+      const confirmed = window.confirm(`Se eliminará la medición del ${formatDate(entry.date)}. ¿Continuar?`);
+      if (!confirmed) return;
       state.measurements = state.measurements.filter((m) => m.id !== entry.id);
       persistAndRender("Medición eliminada.");
     });
@@ -732,9 +842,9 @@ function buildTrendCards() {
     cards.push({ title: "Posible estancamiento", subtitle: stagnation[0].exercise, value: `${stagnation[0].sessions} sesiones` });
   }
 
-  const thisWeek = getLogsForLastNDays(7).length;
-  const prevWeek = getLogsForRange(8, 14).length;
-  cards.push({ title: "Entrenos últimos 7 días", subtitle: `Semana previa: ${prevWeek}`, value: String(thisWeek) });
+  const thisWeek = getWorkoutDayCount(getLogsForLastNDays(7));
+  const prevWeek = getWorkoutDayCount(getLogsForRange(8, 14));
+  cards.push({ title: "Días entrenados últimos 7 días", subtitle: `Semana previa: ${prevWeek}`, value: String(thisWeek) });
 
   return cards;
 }
@@ -871,6 +981,7 @@ function renderSessionExercise(entry) {
   const lastLog = getLastLogForExercise(entry.exercise);
   const lastLabel = lastLog ? `${formatNumber(lastLog.weight)} kg · ${lastLog.sets}x${lastLog.reps}` : "Sin referencia previa";
   const completedClass = entry.completed ? "completed" : "";
+  const saveLabel = entry.savedLogId ? "Actualizar" : "Guardar";
   return `
     <div class="session-exercise ${completedClass}">
       <div class="session-exercise-top">
@@ -880,6 +991,7 @@ function renderSessionExercise(entry) {
         </div>
         <div class="chip-row">
           <span class="chip">Último: ${lastLabel}</span>
+          ${entry.savedLogId ? `<span class="chip success">Guardado</span>` : ""}
           ${entry.completed ? `<span class="chip success">Completado</span>` : `<span class="chip warning">Pendiente</span>`}
         </div>
       </div>
@@ -888,7 +1000,7 @@ function renderSessionExercise(entry) {
         <input data-entry-field="sets" data-entry-id="${entry.id}" type="number" step="1" placeholder="Series" value="${escapeHtml(entry.sets || entry.targetSets || "")}" />
         <input data-entry-field="reps" data-entry-id="${entry.id}" type="number" step="1" placeholder="Reps" value="${escapeHtml(entry.reps || "")}" />
         <input data-entry-field="rpe" data-entry-id="${entry.id}" type="number" min="1" max="10" step="0.5" placeholder="RPE" value="${escapeHtml(entry.rpe || "")}" />
-        <button data-session-action="save-set" data-entry-id="${entry.id}">Guardar</button>
+        <button data-session-action="save-set" data-entry-id="${entry.id}">${saveLabel}</button>
       </div>
       <div class="actions-row">
         <button class="ghost small" data-session-action="prefill-last" data-entry-id="${entry.id}">Usar último peso</button>
@@ -905,6 +1017,11 @@ function startSession(routineId) {
     return;
   }
 
+  if (state.session && state.session.routineId !== routine.id) {
+    const confirmed = window.confirm("Ya tienes una sesión activa. Si continúas, se reemplazará por la nueva rutina.");
+    if (!confirmed) return;
+  }
+
   state.session = {
     id: uid(),
     routineId: routine.id,
@@ -916,12 +1033,13 @@ function startSession(routineId) {
         exercise: exercise.name,
         targetSets: exercise.sets || "",
         targetReps: exercise.reps || "",
-        targetRest: exercise.rest || state.preferences.defaultRestSeconds,
+        targetRest: coerceNumber(exercise.rest) || state.preferences.defaultRestSeconds,
         weight: last?.weight ?? "",
         sets: exercise.sets || "",
         reps: "",
         rpe: "",
-        completed: false
+        completed: false,
+        savedLogId: ""
       };
     })
   };
@@ -938,6 +1056,15 @@ function endSession(showMessage = true) {
 
 function getSessionEntry(entryId) {
   return state.session?.entries.find((entry) => entry.id === entryId) || null;
+}
+
+function findSessionLog(entry) {
+  if (!entry || !state.session) return null;
+  if (entry.savedLogId) return state.workoutLogs.find((log) => log.id === entry.savedLogId) || null;
+  return state.workoutLogs.find((log) =>
+    log.sessionId === state.session.id
+    && log.sessionEntryId === entry.id
+  ) || null;
 }
 
 function prefillLastSessionData(entryId) {
@@ -966,7 +1093,7 @@ function saveSessionEntry(entryId) {
   const entry = getSessionEntry(entryId);
   if (!entry || !state.session) return;
 
-  const fields = qsa(`[data-entry-id="${entryId}"]`);
+  const fields = qsa(`[data-entry-field][data-entry-id="${entryId}"]`);
   const map = {};
   fields.forEach((field) => {
     map[field.dataset.entryField] = field.value;
@@ -983,8 +1110,9 @@ function saveSessionEntry(entryId) {
   entry.rpe = coerceNumber(map.rpe);
   entry.completed = true;
 
-  state.workoutLogs.unshift({
-    id: uid(),
+  const existingLog = findSessionLog(entry);
+  const payload = {
+    id: existingLog?.id || uid(),
     date: state.session.date,
     routineId: state.session.routineId,
     exercise: entry.exercise,
@@ -994,11 +1122,27 @@ function saveSessionEntry(entryId) {
     rpe: coerceNumber(map.rpe),
     rest: coerceNumber(entry.targetRest),
     tempo: "",
-    notes: `Sesión activa · ${routineNameById(state.session.routineId)}`
-  });
+    notes: `Sesión activa · ${routineNameById(state.session.routineId)}`,
+    sessionId: state.session.id,
+    sessionEntryId: entry.id
+  };
+
+  entry.savedLogId = payload.id;
+
+  if (existingLog) {
+    state.workoutLogs = state.workoutLogs.map((log) => log.id === existingLog.id ? payload : log);
+  } else {
+    state.workoutLogs.unshift(payload);
+  }
 
   if (state.preferences.autoStartRest) startRestTimer(Number(entry.targetRest || state.preferences.defaultRestSeconds || 90));
-  persistAndRender("Serie guardada.");
+  persistAndRender(existingLog ? "Registro de la sesión actualizado." : "Serie guardada.");
+}
+
+function updateRestButtonLabel() {
+  const button = qs("#startRestBtn");
+  if (!button) return;
+  button.textContent = `Iniciar ${Number(state.preferences.defaultRestSeconds || 90)} s`;
 }
 
 function renderPreferences() {
@@ -1007,6 +1151,7 @@ function renderPreferences() {
   form.autoStartRest.checked = Boolean(state.preferences.autoStartRest);
   form.keepScreenAwake.checked = Boolean(state.preferences.keepScreenAwake);
   form.unitSystem.value = state.preferences.unitSystem;
+  updateRestButtonLabel();
 
   const status = qs("#pwaStatusBox");
   const checks = [];
@@ -1182,7 +1327,7 @@ function bindControls() {
   qs("#logRoutineFilter").addEventListener("change", renderWorkoutLogs);
 
   qs("#loadDemoBtn").addEventListener("click", () => {
-    state = structuredCloneSafe(demoData);
+    state = migrateState(structuredCloneSafe(demoData));
     clearRoutineForm();
     clearWorkoutForm();
     clearMeasurementForm();
@@ -1190,6 +1335,8 @@ function bindControls() {
   });
 
   qs("#resetBtn").addEventListener("click", () => {
+    const confirmed = window.confirm("Se borrarán todos los datos guardados en este dispositivo. ¿Quieres continuar?");
+    if (!confirmed) return;
     state = getDefaultState();
     clearRoutineForm();
     clearWorkoutForm();
@@ -1204,7 +1351,13 @@ function bindControls() {
   qs("#endSessionBtn").addEventListener("click", () => endSession(true));
   qs("#startTodayBtn").addEventListener("click", () => {
     activateTab("session");
-    if (state.routines[0]) qs("#sessionRoutineSelect").value = state.routines[0].id;
+    if (state.session) return;
+    if (!state.routines[0]) {
+      showToast("Crea una rutina antes de iniciar el entreno.");
+      return;
+    }
+    qs("#sessionRoutineSelect").value = state.routines[0].id;
+    startSession(state.routines[0].id);
   });
 
   qs("#startRestBtn").addEventListener("click", () => startRestTimer(Number(state.preferences.defaultRestSeconds || 90)));
@@ -1232,12 +1385,7 @@ function importBackup(event) {
   reader.onload = () => {
     try {
       const parsed = JSON.parse(String(reader.result));
-      state = {
-        ...getDefaultState(),
-        ...parsed,
-        goals: { ...getDefaultState().goals, ...(parsed.goals || {}) },
-        preferences: { ...getDefaultState().preferences, ...(parsed.preferences || {}) }
-      };
+      state = migrateState(parsed);
       clearRoutineForm();
       clearWorkoutForm();
       clearMeasurementForm();
@@ -1354,6 +1502,7 @@ function init() {
   renderAll();
   registerServiceWorker();
   updateRestTimerLabel();
+  updateRestButtonLabel();
 
   document.addEventListener("visibilitychange", () => {
     if (document.visibilityState === "visible" && state.session && state.preferences.keepScreenAwake) maybeRequestWakeLock();

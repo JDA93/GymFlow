@@ -1,17 +1,15 @@
-# GymFlow Pro
+# GymFlow Pro v1.1
 
-Versión mejorada de la PWA de seguimiento de gimnasio, pensada ya para uso real durante el entreno.
+Versión mejorada de la PWA de seguimiento de gimnasio, lista para subir a GitHub y desplegar.
 
-## Mejoras principales
-- Sesión activa por rutina
-- Guardado rápido de series desde la sesión
-- Temporizador de descanso
-- Edición y borrado de rutinas, entrenos y mediciones
-- Búsqueda y filtros en historial
-- Dashboard con foco del día, PRs y tendencias
-- Preferencias de descanso por defecto
-- PWA más sólida con iconos reales y ayuda para iPhone
-- Backup e importación JSON
+## Qué cambia en esta versión
+- El KPI principal ya cuenta **días entrenados** y no ejercicios guardados
+- El botón **Entrenar ahora** inicia una sesión real
+- El temporizador muestra el descanso por defecto configurado
+- Guardar desde sesión **actualiza** el registro del ejercicio y evita duplicados
+- Confirmaciones antes de borrar rutinas, entrenos, medidas o reiniciar datos
+- Importación y carga demo con migración de estado más robusta
+- Tendencias semanales calculadas por **días de entreno**, no por número de logs
 
 ## Archivos
 - `index.html`
@@ -19,15 +17,14 @@ Versión mejorada de la PWA de seguimiento de gimnasio, pensada ya para uso real
 - `app.js`
 - `manifest.webmanifest`
 - `sw.js`
-- `icons/icon-192.png`
-- `icons/icon-512.png`
 
 ## Cómo probarla en local
 ### Opción A: Python
 ```bash
-cd gymflow_v2
+cd gymflow-pro-v11
 python -m http.server 4173
 ```
+
 Después abre `http://localhost:4173`.
 
 ### Opción B: VS Code
@@ -46,5 +43,5 @@ Puedes subir la carpeta a GitHub Pages, Netlify o Vercel.
 - Pulsa compartir
 - Toca `Añadir a pantalla de inicio`
 
-## Siguiente paso recomendado
-Si luego quieres sincronizar móvil y ordenador, el siguiente salto natural es conectar Supabase.
+## Nota
+Asegúrate de subir también la carpeta `icons/` con tus iconos `icon-192.png` e `icon-512.png`.
