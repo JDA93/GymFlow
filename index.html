@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#111827" />
+    <meta name="description" content="GymFlow Pro: seguimiento de gimnasio con sesión activa, progreso, medidas y objetivos." />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon-192.png" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <title>GymFlow Pro</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="appShell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">PWA instalable · offline · sesión activa</p>
+          <h1>GymFlow Pro</h1>
+          <p class="subtitle">Planifica, entrena, registra, analiza y compara tu progreso desde móvil u ordenador.</p>
+        </div>
+        <div class="topbar-actions">
+          <button id="installBtn" class="ghost" hidden>Instalar app</button>
+          <button id="iosInstallBtn" class="ghost" hidden>Cómo instalar en iPhone</button>
+          <button id="exportBtn" class="ghost">Exportar</button>
+          <label class="ghost file-label">
+            Importar
+            <input id="importInput" type="file" accept="application/json" hidden />
+          </label>
+        </div>
+      </header>
+
+      <section class="hero-card">
+        <div>
+          <span class="pill">Modo local seguro</span>
+          <h2>Todo se guarda en tu dispositivo</h2>
+          <p>Incluye backup en JSON, edición rápida, sesión guiada y métricas de progreso. Más adelante podrás conectar Supabase para sincronizar entre dispositivos.</p>
+        </div>
+        <div class="hero-actions">
+          <button id="startTodayBtn">Entrenar ahora</button>
+          <button id="loadDemoBtn" class="ghost">Cargar demo</button>
+          <button id="resetBtn" class="danger">Reiniciar datos</button>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        <article class="stat-card accent-card">
+          <p>Sesiones este mes</p>
+          <strong id="statSessionsMonth">0</strong>
+          <span>Registros acumulados</span>
+        </article>
+        <article class="stat-card">
+          <p>Racha real</p>
+          <strong id="statStreak">0</strong>
+          <span>Solo cuenta si sigues activo</span>
+        </article>
+        <article class="stat-card">
+          <p>Peso actual</p>
+          <strong id="statWeight">—</strong>
+          <span>Última medición</span>
+        </article>
+        <article class="stat-card">
+          <p>Mejor levantamiento</p>
+          <strong id="statBestLift">—</strong>
+          <span id="statBestLiftLabel">Sin datos</span>
+        </article>
+      </section>
+
+      <nav class="tabbar" aria-label="Secciones">
+        <button class="tab active" data-tab="dashboard">Dashboard</button>
+        <button class="tab" data-tab="session">Sesión</button>
+        <button class="tab" data-tab="routines">Rutinas</button>
+        <button class="tab" data-tab="logs">Entrenos</button>
+        <button class="tab" data-tab="measurements">Medidas</button>
+        <button class="tab" data-tab="analytics">Evolución</button>
+        <button class="tab" data-tab="goals">Objetivos</button>
+        <button class="tab" data-tab="settings">Ajustes</button>
+      </nav>
+
+      <main class="layout">
+        <section id="dashboard" class="tab-panel active">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Progresión de ejercicio</h3>
+                  <p>Comparativa de peso y volumen en tus últimos registros.</p>
+                </div>
+                <select id="dashboardExerciseSelect"></select>
+              </div>
+              <div id="exerciseChart" class="chart"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Evolución corporal</h3>
+                  <p>Mide el cambio real de las variables que te importan.</p>
+                </div>
+                <select id="dashboardMetricSelect">
+                  <option value="bodyWeight">Peso</option>
+                  <option value="bodyFat">Grasa %</option>
+                  <option value="waist">Cintura</option>
+                  <option value="chest">Pecho</option>
+                  <option value="arm">Brazo</option>
+                  <option value="thigh">Pierna</option>
+                  <option value="hips">Cadera</option>
+                  <option value="sleepHours">Sueño</option>
+                </select>
+              </div>
+              <div id="bodyChart" class="chart"></div>
+            </article>
+          </div>
+
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Tu foco de hoy</h3>
+                  <p>Lo más útil para decidir qué hacer ahora.</p>
+                </div>
+              </div>
+              <div id="todayFocus" class="list compact"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Últimos registros</h3>
+                  <p>Historial reciente con volumen y esfuerzo.</p>
+                </div>
+              </div>
+              <div id="recentLogs" class="list compact"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="session" class="tab-panel">
+          <div class="panel-grid two session-grid">
+            <article class="card sticky-card">
+              <div class="card-head">
+                <div>
+                  <h3>Sesión activa</h3>
+                  <p>Entrena dentro de la app con último peso, descanso y progreso.</p>
+                </div>
+              </div>
+
+              <div class="form-grid">
+                <select id="sessionRoutineSelect"></select>
+                <div class="session-actions-row">
+                  <button id="startSessionBtn">Iniciar sesión</button>
+                  <button id="endSessionBtn" class="ghost">Cerrar sesión</button>
+                </div>
+              </div>
+
+              <div id="activeSessionCard" class="active-session empty-box">
+                <p class="empty">Selecciona una rutina e inicia la sesión para ver tus ejercicios aquí.</p>
+              </div>
+
+              <div class="rest-timer">
+                <div>
+                  <p class="eyebrow-dark">Temporizador de descanso</p>
+                  <strong id="restTimerLabel">00:00</strong>
+                </div>
+                <div class="session-actions-row">
+                  <button id="startRestBtn" class="ghost small">Iniciar 90 s</button>
+                  <button id="stopRestBtn" class="ghost small">Parar</button>
+                </div>
+              </div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Registrar rápido</h3>
+                  <p>También puedes guardar una serie o sesión manualmente.</p>
+                </div>
+              </div>
+
+              <form id="workoutForm" class="form-grid">
+                <input name="date" type="date" required />
+                <select name="routineId" id="workoutRoutineSelect"></select>
+                <input name="exercise" list="exerciseSuggestions" placeholder="Ejercicio" required />
+                <datalist id="exerciseSuggestions"></datalist>
+                <div class="mini-grid">
+                  <input name="weight" type="number" step="0.5" placeholder="Kg" required />
+                  <input name="sets" type="number" step="1" placeholder="Series" required />
+                  <input name="reps" type="number" step="1" placeholder="Reps" required />
+                </div>
+                <div class="mini-grid">
+                  <input name="rpe" type="number" min="1" max="10" step="0.5" placeholder="RPE" />
+                  <input name="rest" type="number" min="0" step="15" placeholder="Descanso (seg)" />
+                  <input name="tempo" placeholder="Tempo (3-1-1)" />
+                </div>
+                <textarea name="notes" placeholder="Notas del entrenamiento"></textarea>
+                <div class="session-actions-row">
+                  <button type="submit">Guardar registro</button>
+                  <button type="button" id="cancelWorkoutEditBtn" class="ghost" hidden>Cancelar edición</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <section id="routines" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Nueva rutina</h3>
+                  <p>Crea planes reutilizables y luego lánzalos como sesión activa.</p>
+                </div>
+              </div>
+              <form id="routineForm" class="form-grid">
+                <input name="name" placeholder="Nombre de la rutina" required />
+                <input name="day" placeholder="Día o bloque" />
+                <input name="focus" placeholder="Objetivo: fuerza, hipertrofia..." />
+                <textarea name="notes" placeholder="Notas de la rutina"></textarea>
+
+                <div class="exercise-builder">
+                  <div class="exercise-builder-head">
+                    <h4>Ejercicios</h4>
+                    <button type="button" id="addExerciseRowBtn" class="ghost small">Añadir ejercicio</button>
+                  </div>
+                  <div id="exerciseRows"></div>
+                </div>
+
+                <div class="session-actions-row">
+                  <button type="submit">Guardar rutina</button>
+                  <button type="button" id="cancelRoutineEditBtn" class="ghost" hidden>Cancelar edición</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Tus rutinas</h3>
+                  <p>Duplica, edita y lanza cada rutina directamente.</p>
+                </div>
+              </div>
+              <div id="routineList" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="logs" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Historial de entrenos</h3>
+                  <p>Filtra por ejercicio o rutina y corrige datos cuando haga falta.</p>
+                </div>
+              </div>
+              <div class="toolbar-grid">
+                <input id="logSearchInput" placeholder="Buscar ejercicio" />
+                <select id="logRoutineFilter"></select>
+              </div>
+              <div id="workoutList" class="list"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>PRs por ejercicio</h3>
+                  <p>Máxima carga registrada en cada movimiento.</p>
+                </div>
+              </div>
+              <div id="prList" class="list compact"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="measurements" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Registrar medidas</h3>
+                  <p>Lleva control físico con contexto, descanso y notas.</p>
+                </div>
+              </div>
+              <form id="measurementForm" class="form-grid">
+                <input name="date" type="date" required />
+                <div class="mini-grid">
+                  <input name="bodyWeight" type="number" step="0.1" placeholder="Peso (kg)" />
+                  <input name="bodyFat" type="number" step="0.1" placeholder="Grasa (%)" />
+                  <input name="waist" type="number" step="0.1" placeholder="Cintura (cm)" />
+                </div>
+                <div class="mini-grid">
+                  <input name="chest" type="number" step="0.1" placeholder="Pecho (cm)" />
+                  <input name="arm" type="number" step="0.1" placeholder="Brazo (cm)" />
+                  <input name="thigh" type="number" step="0.1" placeholder="Pierna (cm)" />
+                </div>
+                <div class="mini-grid">
+                  <input name="hips" type="number" step="0.1" placeholder="Cadera (cm)" />
+                  <input name="neck" type="number" step="0.1" placeholder="Cuello (cm)" />
+                  <input name="sleepHours" type="number" step="0.5" placeholder="Sueño (h)" />
+                </div>
+                <textarea name="notes" placeholder="Notas de sensaciones o cambios"></textarea>
+                <div class="session-actions-row">
+                  <button type="submit">Guardar medición</button>
+                  <button type="button" id="cancelMeasurementEditBtn" class="ghost" hidden>Cancelar edición</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Historial corporal</h3>
+                  <p>Revisa tendencia y corrige registros anteriores.</p>
+                </div>
+              </div>
+              <div id="measurementList" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="analytics" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Volumen por ejercicio</h3>
+                  <p>Suma de kg × reps × series.</p>
+                </div>
+              </div>
+              <div id="volumeSummary" class="list compact"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Tendencias útiles</h3>
+                  <p>Semanas activas, progreso y señales de estancamiento.</p>
+                </div>
+              </div>
+              <div id="trendSummary" class="list compact"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="goals" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Objetivos</h3>
+                  <p>Define metas de composición y básicos.</p>
+                </div>
+              </div>
+              <form id="goalForm" class="form-grid">
+                <input name="athleteName" placeholder="Tu nombre en la app" />
+                <div class="mini-grid">
+                  <input name="weightGoal" type="number" step="0.1" placeholder="Objetivo de peso (kg)" />
+                  <input name="waistGoal" type="number" step="0.1" placeholder="Objetivo de cintura (cm)" />
+                  <input name="bodyFatGoal" type="number" step="0.1" placeholder="Objetivo de grasa (%)" />
+                </div>
+                <div class="mini-grid">
+                  <input name="benchGoal" type="number" step="0.5" placeholder="Press banca objetivo" />
+                  <input name="squatGoal" type="number" step="0.5" placeholder="Sentadilla objetivo" />
+                  <input name="deadliftGoal" type="number" step="0.5" placeholder="Peso muerto objetivo" />
+                </div>
+                <textarea name="focusGoal" placeholder="Meta principal del bloque"></textarea>
+                <button type="submit">Guardar objetivos</button>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Estado frente a objetivos</h3>
+                  <p>Comparativa directa de tus datos actuales.</p>
+                </div>
+              </div>
+              <div id="goalSummary" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="settings" class="tab-panel">
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Preferencias</h3>
+                  <p>Personaliza cómo se comporta la app durante tus entrenos.</p>
+                </div>
+              </div>
+              <form id="preferencesForm" class="form-grid">
+                <div class="mini-grid two-columns">
+                  <input name="defaultRestSeconds" type="number" min="15" step="15" placeholder="Descanso por defecto (seg)" />
+                  <select name="unitSystem">
+                    <option value="metric">Sistema métrico</option>
+                  </select>
+                </div>
+                <label class="switch-row">
+                  <input name="autoStartRest" type="checkbox" />
+                  <span>Iniciar automáticamente el descanso al guardar una serie</span>
+                </label>
+                <label class="switch-row">
+                  <input name="keepScreenAwake" type="checkbox" />
+                  <span>Intentar mantener la pantalla activa durante la sesión</span>
+                </label>
+                <button type="submit">Guardar preferencias</button>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h3>Estado PWA</h3>
+                  <p>Ayuda rápida si no ves la opción de instalar.</p>
+                </div>
+              </div>
+              <div id="pwaStatusBox" class="list"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="iosInstallDialog">
+      <div class="dialog-card">
+        <h3>Instalar en iPhone</h3>
+        <p>Abre la app en Safari, toca el botón compartir y luego selecciona <strong>Añadir a pantalla de inicio</strong>.</p>
+        <button id="closeIosDialogBtn">Entendido</button>
+      </div>
+    </dialog>
+
+    <template id="exerciseRowTemplate">
+      <div class="exercise-row">
+        <input data-field="name" placeholder="Ejercicio" />
+        <input data-field="sets" type="number" step="1" placeholder="Series" />
+        <input data-field="reps" placeholder="Reps" />
+        <input data-field="rest" type="number" step="15" placeholder="Descanso" />
+        <button type="button" class="ghost small remove-row">Quitar</button>
+      </div>
+    </template>
+
+    <script src="app.js"></script>
+  </body>
+</html>
