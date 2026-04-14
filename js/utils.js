@@ -151,9 +151,37 @@ export function numOrBlank(value) {
   return value === "" || value == null ? "" : Number(value);
 }
 
+export function optionalNumber(value, { min = -Infinity, max = Infinity } = {}) {
+  if (value === "" || value == null) return "";
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return "";
+  if (parsed < min || parsed > max) return "";
+  return parsed;
+}
+
 export function safeNumber(value, fallback = 0) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+export function normalizeNameForMatch(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+export function safeClone(value) {
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch (error) {
+      console.warn("structuredClone falló, se usa fallback JSON.", error);
+    }
+  }
+  return JSON.parse(JSON.stringify(value));
 }
 
 export function clamp(value, min, max) {

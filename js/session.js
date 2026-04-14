@@ -1,5 +1,5 @@
 import { getExerciseMeta, normalizeWorkoutRecord } from "./catalog.js";
-import { calcVolumeFromEntries, datePartFromIso, FALLBACK_REST_SECONDS, todayLocal, uid } from "./utils.js";
+import { calcVolumeFromEntries, datePartFromIso, FALLBACK_REST_SECONDS, normalizeNameForMatch, optionalNumber, safeNumber, todayLocal, uid } from "./utils.js";
 import { getActiveRoutine, syncSessionHistoryEntry } from "./analytics.js";
 
 export function createBlankSession() {
@@ -121,7 +121,7 @@ export function addSessionSet(state, exerciseId, payload) {
 
   const weight = Number(payload.weight);
   const reps = Number(payload.reps);
-  const rest = Number(payload.rest || exercise.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS);
+  const rest = safeNumber(payload.rest || exercise.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS);
   const isWarmup = Boolean(payload.isWarmup);
 
   if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
@@ -138,7 +138,7 @@ export function addSessionSet(state, exerciseId, payload) {
     movementPattern: meta.pattern,
     weight,
     reps,
-    rpe: payload.rpe === "" || payload.rpe == null ? "" : Number(payload.rpe),
+    rpe: optionalNumber(payload.rpe, { min: 1, max: 10 }),
     rest,
     isWarmup,
     createdAt: new Date().toISOString(),
@@ -197,27 +197,57 @@ export function copyLastSessionIntoActive(state) {
   }
 
   const now = Date.now();
-  state.session.setEntries = sourceEntries.map((item, index) => ({
-    id: uid(),
-    exerciseId: routine.exercises.find((exercise) => exercise.catalogId === (item.exerciseId || item.exerciseKey))?.id
-      || routine.exercises.find((exercise) => exercise.name === item.exercise)?.id
-      || item.exerciseId,
-    exerciseName: item.exercise,
-    exerciseKey: item.exerciseKey || item.exerciseId,
-    muscleGroup: item.muscleGroup || "",
-    movementPattern: item.movementPattern || "",
-    weight: Number(item.weight || 0),
-    reps: Number(item.reps || 0),
-    rpe: item.rpe === "" ? "" : Number(item.rpe),
-    rest: item.rest === "" ? "" : Number(item.rest),
-    isWarmup: Boolean(item.isWarmup),
-    createdAt: new Date(now + index * 1000).toISOString(),
-    notes: item.notes || ""
-  }));
+  const copied = [];
+  const omitted = [];
+  sourceEntries.forEach((item) => {
+    const matchedExercise = matchRoutineExercise(routine, item);
+    if (!matchedExercise) {
+      omitted.push(item.id);
+      return;
+    }
+    copied.push({
+      id: uid(),
+      exerciseId: matchedExercise.id,
+      exerciseName: matchedExercise.name,
+      exerciseKey: matchedExercise.exerciseKey || matchedExercise.catalogId || item.exerciseKey || item.exerciseId || "",
+      muscleGroup: matchedExercise.muscleGroup || item.muscleGroup || "",
+      movementPattern: matchedExercise.movementPattern || item.movementPattern || "",
+      weight: safeNumber(item.weight, 0),
+      reps: Math.max(1, safeNumber(item.reps, 1)),
+      rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
+      rest: optionalNumber(item.rest, { min: 0 }),
+      isWarmup: Boolean(item.isWarmup),
+      createdAt: new Date(now + copied.length * 1000).toISOString(),
+      notes: String(item.notes || "")
+    });
+  });
+
+  state.session.setEntries = copied;
   state.session.skippedExerciseIds = [];
   state.session.lastDeletedSet = null;
   recomputeCompletedExercises(state);
-  return { ok: true, message: `Se han copiado ${sourceEntries.length} series de la última sesión.` };
+  if (!copied.length) {
+    return { ok: false, message: "La sesión anterior no tiene series compatibles con la rutina activa." };
+  }
+  return {
+    ok: true,
+    message: omitted.length
+      ? `Se copiaron ${copied.length} series válidas. ${omitted.length} se omitieron por no tener match seguro.`
+      : `Se han copiado ${copied.length} series de la última sesión.`
+  };
+}
+
+function matchRoutineExercise(routine, entry) {
+  if (!routine?.exercises?.length) return null;
+  const byRoutineInternalId = routine.exercises.find((exercise) => exercise.id && exercise.id === entry.exerciseId);
+  if (byRoutineInternalId) return byRoutineInternalId;
+  const byCatalogId = routine.exercises.find((exercise) => exercise.catalogId && exercise.catalogId === entry.exerciseId);
+  if (byCatalogId) return byCatalogId;
+  const byExerciseKey = routine.exercises.find((exercise) => exercise.exerciseKey && exercise.exerciseKey === (entry.exerciseKey || entry.exerciseId));
+  if (byExerciseKey) return byExerciseKey;
+  const normalizedEntryName = normalizeNameForMatch(entry.exercise || entry.exerciseName);
+  if (!normalizedEntryName) return null;
+  return routine.exercises.find((exercise) => normalizeNameForMatch(exercise.name) === normalizedEntryName) || null;
 }
 
 export function getNextSuggestedExerciseId(state, currentExerciseId = "") {
@@ -288,6 +318,8 @@ export function endSession(state) {
     endedAt,
     durationSeconds: getSessionDurationSeconds(state),
     totalSets: entries.length,
+    workingSets: entries.filter((entry) => !entry.isWarmup).length,
+    warmupSets: entries.filter((entry) => entry.isWarmup).length,
     exercisesCompleted: effectiveCompleted,
     volume: calcVolumeFromEntries(entries),
     notes: state.session.notes || ""

@@ -26,6 +26,8 @@ export function renderSession(state, els) {
 
   const effectiveCompleted = (routine.exercises || []).filter((exercise) => getExerciseCompletionStatus(state, exercise).completed).length;
   const skippedCount = (routine.exercises || []).filter((exercise) => isExerciseSkipped(state, exercise.id)).length;
+  const workingSetCount = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+  const warmupSetCount = state.session.setEntries.filter((entry) => entry.isWarmup).length;
   const progressBase = routine.exercises.length || 1;
   const progress = Math.round(((effectiveCompleted + skippedCount) / progressBase) * 100);
   const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
@@ -45,7 +47,8 @@ export function renderSession(state, els) {
       <div class="chip-row">
         <span class="chip ghost">Siguiente: ${escapeHtml(routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—")}</span>
         <span class="chip ghost">Omitidos ${skippedCount}</span>
-        <span class="chip ghost">Series ${state.session.setEntries.length}</span>
+        <span class="chip ghost">Efectivas ${workingSetCount}</span>
+        <span class="chip ghost">Warm-up ${warmupSetCount}</span>
       </div>
     </div>
   `;
