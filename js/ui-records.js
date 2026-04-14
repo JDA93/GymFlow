@@ -68,7 +68,8 @@ function renderSessionHistoryCard(item) {
         <span class="chip success">${formatNumber(item.volume)} kg</span>
       </div>
       <div class="chip-row">
-        <span class="chip ghost">${item.totalSets} series</span>
+        <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
+        <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
         <span class="chip ghost">${formatDuration(item.durationSeconds || 0)}</span>
         ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
       </div>

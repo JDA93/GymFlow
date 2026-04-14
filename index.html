@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#6d5efc" />
-    <meta name="description" content="GymFlow Pro v6: seguimiento de gimnasio offline, sesión activa mejorada, analítica útil y PWA instalable." />
+    <meta name="description" content="GymFlow Pro v7: seguimiento de gimnasio offline-first con sesión activa robusta, histórico coherente y analítica fiable." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="GymFlow" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro v6</title>
+    <title>GymFlow Pro v7</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -21,7 +21,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">PWA instalable · offline-first · IndexedDB + respaldo · sesión real</p>
-          <h1>GymFlow Pro v6</h1>
+          <h1>GymFlow Pro v7</h1>
           <p class="subtitle">Más pulida, más segura y mucho más rápida para entrenar de verdad.</p>
         </div>
 
@@ -128,6 +128,13 @@
                       <option value="e1rm">e1RM</option>
                       <option value="volume">Volumen</option>
                       <option value="reps">Reps</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="sr-only" for="chartAggregationSelect">Agrupación del gráfico</label>
+                    <select id="chartAggregationSelect">
+                      <option value="day">Agrupar por día</option>
+                      <option value="reference">Agrupar por sesión/ref</option>
                     </select>
                   </div>
                 </div>

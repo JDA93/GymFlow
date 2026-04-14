@@ -22,7 +22,7 @@ import { renderDashboard, renderStats } from "./js/ui-dashboard.js";
 import { renderAnalytics, renderGoalForm, renderGoalSummary, renderPreferencesForm, renderPwaStatus } from "./js/ui-meta.js";
 import { renderMeasurements, renderPrList, renderRoutines, renderWorkoutList } from "./js/ui-records.js";
 import { renderSession } from "./js/ui-session.js";
-import { downloadBlob, FALLBACK_REST_SECONDS, formatDuration, formatNumber, isoFromLocalDateTime, moveItem, numOrBlank, offsetDate, todayLocal, toCsv, uid, roundToStep } from "./js/utils.js";
+import { downloadBlob, FALLBACK_REST_SECONDS, formatDuration, formatNumber, isoFromLocalDateTime, moveItem, numOrBlank, offsetDate, optionalNumber, safeClone, todayLocal, toCsv, uid, roundToStep } from "./js/utils.js";
 
 const els = {
   networkBadge: document.querySelector("#networkBadge"),
@@ -42,6 +42,7 @@ const els = {
   recentStory: document.querySelector("#recentStory"),
   dashboardExerciseSelect: document.querySelector("#dashboardExerciseSelect"),
   dashboardExerciseMetricSelect: document.querySelector("#dashboardExerciseMetricSelect"),
+  chartAggregationSelect: document.querySelector("#chartAggregationSelect"),
   dashboardMetricSelect: document.querySelector("#dashboardMetricSelect"),
   exerciseChart: document.querySelector("#exerciseChart"),
   bodyChart: document.querySelector("#bodyChart"),
@@ -176,6 +177,12 @@ function bindEvents() {
   els.dashboardMetricSelect.addEventListener("change", (event) => {
     store.state.ui.dashboardMetric = event.target.value;
     renderDashboardArea();
+    store.queueSave();
+  });
+  els.chartAggregationSelect?.addEventListener("change", (event) => {
+    store.state.ui.chartAggregation = event.target.value;
+    renderDashboardArea();
+    renderAnalyticsArea();
     store.queueSave();
   });
   els.analyticsLiftSelect.addEventListener("change", (event) => {
@@ -721,8 +728,8 @@ function saveWorkoutFromForm(event) {
     weight,
     sets,
     reps,
-    rpe: form.get("rpe") ? Number(form.get("rpe")) : "",
-    rest: form.get("rest") ? Number(form.get("rest")) : "",
+    rpe: optionalNumber(form.get("rpe"), { min: 1, max: 10 }),
+    rest: optionalNumber(form.get("rest"), { min: 0 }),
     tempo: String(form.get("tempo") || "").trim(),
     notes: String(form.get("notes") || "").trim(),
     isWarmup: false,
@@ -875,7 +882,7 @@ function cancelRoutineEdit() {
 function duplicateRoutine(id) {
   const routine = store.state.routines.find((item) => item.id === id);
   if (!routine) return;
-  const clone = structuredClone(routine);
+  const clone = safeClone(routine);
   clone.id = uid();
   clone.name = `${routine.name} copia`;
   clone.createdAt = new Date().toISOString();
@@ -905,7 +912,7 @@ function openHistoryGroupEditor(groupId) {
   const { entryIds, sessionId } = resolveGroupEntries(store.state, groupId);
   const entries = store.state.workouts.filter((item) => entryIds.includes(item.id)).sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
   if (!entries.length) return;
-  editingEntriesContext = { entryIds, sessionId, mode: 'group' };
+  editingEntriesContext = { entryIds, sessionId, mode: 'group', allowSetEditing: true };
   els.groupEditorTitle.textContent = `Corregir bloque: ${entries[0].exercise}`;
   els.groupEditorContent.innerHTML = buildEditorRows(entries);
   els.groupEditorDialog.showModal();
@@ -914,13 +921,14 @@ function openHistoryGroupEditor(groupId) {
 function openSessionHistoryEditor(sessionId) {
   const entries = store.state.workouts.filter((item) => item.sessionId === sessionId).sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
   if (!entries.length) return;
-  editingEntriesContext = { entryIds: entries.map((item) => item.id), sessionId, mode: 'session' };
+  editingEntriesContext = { entryIds: entries.map((item) => item.id), sessionId, mode: 'session', allowSetEditing: false };
   els.groupEditorTitle.textContent = `Corregir sesión completa`;
   els.groupEditorContent.innerHTML = buildEditorRows(entries, true);
   els.groupEditorDialog.showModal();
 }
 
 function buildEditorRows(entries, includeExercise = false) {
+  const allowSetEditing = Boolean(editingEntriesContext?.allowSetEditing);
   return `
     <div class="editor-grid">
       ${entries.map((entry, index) => `
@@ -931,7 +939,9 @@ function buildEditorRows(entries, includeExercise = false) {
           </div>
           <div class="editor-row-grid">
             <label>Kg<input name="weight" type="number" min="0" step="0.5" value="${entry.weight}"></label>
-            <label>Series<input name="sets" type="number" min="1" step="1" value="${entry.sets}"></label>
+            ${allowSetEditing
+              ? `<label>Series<input name="sets" type="number" min="1" step="1" value="${entry.sets}"></label>`
+              : `<label>Series<input name="sets" type="number" min="1" step="1" value="1" disabled></label>`}
             <label>Reps<input name="reps" type="number" min="1" step="1" value="${entry.reps}"></label>
             <label>RPE<input name="rpe" type="number" min="1" max="10" step="0.5" value="${entry.rpe === '' ? '' : entry.rpe}"></label>
             <label>Descanso<input name="rest" type="number" min="0" step="15" value="${entry.rest === '' ? '' : entry.rest}"></label>
@@ -952,7 +962,7 @@ function saveEditedHistoryEntries(event) {
     const entry = store.state.workouts.find((item) => item.id === entryId);
     if (!entry) continue;
     const weight = Number(block.querySelector('[name="weight"]').value);
-    const sets = Number(block.querySelector('[name="sets"]').value);
+    const sets = editingEntriesContext.allowSetEditing ? Number(block.querySelector('[name="sets"]').value) : 1;
     const reps = Number(block.querySelector('[name="reps"]').value);
     if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(sets) || sets <= 0 || !Number.isFinite(reps) || reps <= 0) {
       toast(els, 'Revisa peso, series y repeticiones.');
@@ -961,8 +971,8 @@ function saveEditedHistoryEntries(event) {
     entry.weight = weight;
     entry.sets = sets;
     entry.reps = reps;
-    entry.rpe = block.querySelector('[name="rpe"]').value === '' ? '' : Number(block.querySelector('[name="rpe"]').value);
-    entry.rest = block.querySelector('[name="rest"]').value === '' ? '' : Number(block.querySelector('[name="rest"]').value);
+    entry.rpe = optionalNumber(block.querySelector('[name="rpe"]').value, { min: 1, max: 10 });
+    entry.rest = optionalNumber(block.querySelector('[name="rest"]').value, { min: 0 });
     entry.notes = block.querySelector('[name="notes"]').value.trim();
     entry.updatedAt = new Date().toISOString();
   }

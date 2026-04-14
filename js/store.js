@@ -1,4 +1,4 @@
-import { mergeDeep, numOrBlank, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
+import { mergeDeep, numOrBlank, optionalNumber, safeClone, safeNumber, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
 import { normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
 
 const DB_NAME = "gymflow-pro-v6-db";
@@ -15,7 +15,7 @@ const LEGACY_STORAGE_KEYS = [
 
 export function defaultState() {
   return {
-    version: 6,
+    version: 7,
     workouts: [],
     measurements: [],
     routines: [],
@@ -72,6 +72,7 @@ export function defaultState() {
       dashboardExerciseId: "",
       dashboardExerciseMetric: "e1rm",
       dashboardMetric: "bodyWeight",
+      chartAggregation: "day",
       analyticsLiftId: "",
       logSearch: "",
       logRoutine: "all",
@@ -172,7 +173,7 @@ export async function createStore(saveStatusEl) {
 
   async function persist() {
     updateSaveIndicator("saving");
-    const snapshot = structuredClone(state);
+    const snapshot = safeClone(state);
     try {
       localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(snapshot));
     } catch (error) {
@@ -203,7 +204,7 @@ export async function createStore(saveStatusEl) {
 export function migrateState(rawState) {
   const raw = rawState || {};
   const base = mergeDeep(defaultState(), raw);
-  base.version = 6;
+  base.version = 7;
 
   const legacyGoals = raw.goals || {};
   base.goals = {
@@ -237,11 +238,11 @@ export function migrateState(rawState) {
     routineId: item.routineId || "",
     sessionId: item.sessionId || "",
     exercise: String(item.exercise || item.exerciseName || "").trim(),
-    weight: Number(item.weight || 0),
-    sets: Number(item.sets || 1),
-    reps: Number(item.reps || 0),
-    rpe: item.rpe === "" || item.rpe == null ? "" : Number(item.rpe),
-    rest: item.rest === "" || item.rest == null ? "" : Number(item.rest),
+    weight: safeNumber(item.weight, 0),
+    sets: item.sessionId ? 1 : Math.max(1, safeNumber(item.sets, 1)),
+    reps: Math.max(1, safeNumber(item.reps, 1)),
+    rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
+    rest: optionalNumber(item.rest, { min: 0 }),
     tempo: String(item.tempo || "").trim(),
     notes: String(item.notes || "").trim(),
     isWarmup: Boolean(item.isWarmup),
@@ -299,6 +300,8 @@ export function migrateState(rawState) {
     endedAt: item.endedAt || "",
     durationSeconds: Number(item.durationSeconds || 0),
     totalSets: Number(item.totalSets || 0),
+    workingSets: Number(item.workingSets || item.totalSets || 0),
+    warmupSets: Number(item.warmupSets || 0),
     exercisesCompleted: Number(item.exercisesCompleted || 0),
     volume: Number(item.volume || 0),
     notes: String(item.notes || "").trim()
@@ -325,10 +328,10 @@ export function migrateState(rawState) {
         exerciseKey: entry.exerciseKey || "",
         muscleGroup: entry.muscleGroup || "",
         movementPattern: entry.movementPattern || "",
-        weight: Number(entry.weight || 0),
-        reps: Number(entry.reps || 0),
-        rpe: entry.rpe === "" || entry.rpe == null ? "" : Number(entry.rpe),
-        rest: entry.rest === "" || entry.rest == null ? "" : Number(entry.rest),
+        weight: safeNumber(entry.weight, 0),
+        reps: Math.max(1, safeNumber(entry.reps, 1)),
+        rpe: optionalNumber(entry.rpe, { min: 1, max: 10 }),
+        rest: optionalNumber(entry.rest, { min: 0 }),
         isWarmup: Boolean(entry.isWarmup),
         createdAt: entry.createdAt || new Date().toISOString(),
         updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
@@ -355,6 +358,17 @@ export function migrateState(rawState) {
       }))
       : []
   };
+  if (base.session.active) {
+    const activeRoutine = base.routines.find((routine) => routine.id === base.session.routineId);
+    const validExerciseIds = new Set((activeRoutine?.exercises || []).map((exercise) => exercise.id));
+    base.session.setEntries = base.session.setEntries.filter((entry) => validExerciseIds.has(entry.exerciseId));
+    if (!activeRoutine) {
+      base.session.active = false;
+      base.session.setEntries = [];
+      base.session.completedExerciseIds = [];
+      base.session.skippedExerciseIds = [];
+    }
+  }
 
   base.ui = {
     ...defaultState().ui,
@@ -363,6 +377,7 @@ export function migrateState(rawState) {
 
   if (!base.ui.dashboardExerciseMetric) base.ui.dashboardExerciseMetric = "e1rm";
   if (!base.ui.dashboardMetric) base.ui.dashboardMetric = "bodyWeight";
+  if (!base.ui.chartAggregation) base.ui.chartAggregation = "day";
   if (!base.ui.logRoutine) base.ui.logRoutine = "all";
   if (!base.ui.logSort) base.ui.logSort = "date_desc";
   if (!base.ui.logSource) base.ui.logSource = "all";
@@ -401,7 +416,7 @@ function idbSet(db, key, value) {
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(DB_STORE, "readwrite");
     const store = transaction.objectStore(DB_STORE);
-    const request = store.put(structuredClone(value), key);
+    const request = store.put(safeClone(value), key);
     request.onerror = () => reject(request.error);
     request.onsuccess = () => resolve();
   });

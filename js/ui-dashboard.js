@@ -37,11 +37,13 @@ function renderPrimaryAction(state, els) {
   const active = state.session.active;
   if (active) {
     const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
     els.dashboardPrimaryCard.innerHTML = `
       <div class="hero-copy">
         <span class="pill">Sesión en curso</span>
         <h2>Continúa tu sesión activa</h2>
-        <p>Llevas ${state.session.setEntries.length} series registradas y ${formatNumber(volume)} kg de volumen efectivo.</p>
+        <p>Llevas ${workingSets} series efectivas (${warmupSets} warm-up) y ${formatNumber(volume)} kg de volumen efectivo.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
         <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
@@ -147,11 +149,12 @@ function renderExerciseSelect(state, els, exerciseOptions) {
   els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
   els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
   els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
+  if (els.chartAggregationSelect) els.chartAggregationSelect.value = state.ui.chartAggregation || "day";
 }
 
 function renderExerciseChart(state, els) {
   const metric = state.ui.dashboardExerciseMetric || "e1rm";
-  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric);
+  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
   const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
   const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
   els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");

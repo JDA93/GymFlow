@@ -311,23 +311,32 @@ export function nextLoadSuggestionForExercise(state, routineExercise) {
   };
 }
 
-export function buildExerciseChartPoints(state, exerciseId, metric) {
+export function buildExerciseChartPoints(state, exerciseId, metric, aggregation = "day") {
   if (!exerciseId) return [];
-  const groups = groupBy(
-    state.workouts.filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup),
-    (item) => item.date
-  );
+  const rows = state.workouts.filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup);
+  const groups = groupBy(rows, (item) => {
+    if (aggregation === "reference") {
+      return item.sessionId ? `session|${item.sessionId}` : `manual|${item.id}`;
+    }
+    return item.date;
+  });
 
   return Object.entries(groups)
-    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .sort((a, b) => {
+      const firstA = a[1][0];
+      const firstB = b[1][0];
+      return String(firstA.date || "").localeCompare(String(firstB.date || ""))
+        || String(firstA.createdAt || "").localeCompare(String(firstB.createdAt || ""));
+    })
     .slice(-12)
-    .map(([date, logs]) => {
+    .map(([, logs]) => {
+      const anchor = [...logs].sort(sortByDateAsc)[0];
       let value = 0;
       if (metric === "weight") value = Math.max(...logs.map((item) => Number(item.weight || 0)));
       if (metric === "e1rm") value = Math.max(...logs.map((item) => estimateE1RM(item.weight, item.reps)));
       if (metric === "volume") value = logs.reduce((sum, item) => sum + calcVolume(item), 0);
       if (metric === "reps") value = Math.max(...logs.map((item) => Number(item.reps || 0)));
-      return { label: shortLabel(date), value };
+      return { label: shortLabel(anchor.date), value };
     })
     .filter((point) => Number.isFinite(point.value));
 }
@@ -477,7 +486,9 @@ export function syncSessionHistoryEntry(state, sessionId) {
     startedAt: existing?.startedAt || first.createdAt || "",
     endedAt: existing?.endedAt || last.updatedAt || last.createdAt || "",
     durationSeconds: existing?.durationSeconds || 0,
-    totalSets: records.reduce((sum, item) => sum + Number(item.sets || 1), 0),
+    totalSets: records.length,
+    workingSets: nonWarmups.length,
+    warmupSets: records.length - nonWarmups.length,
     exercisesCompleted: uniq(nonWarmups.map((item) => item.exerciseId || item.exerciseKey || item.exercise)).length,
     volume: nonWarmups.reduce((sum, item) => sum + calcVolume(item), 0),
     notes: existing?.notes || ""
@@ -522,6 +533,8 @@ export function buildHistoryFeed(state) {
       searchText: `${session.routineName} ${exercises.map((item) => item.exercise).join(" ")}`.toLowerCase(),
       durationSeconds: session.durationSeconds,
       totalSets: session.totalSets,
+      workingSets: session.workingSets ?? session.totalSets,
+      warmupSets: session.warmupSets ?? 0,
       volume: session.volume,
       exercisesCompleted: session.exercisesCompleted,
       exercises,
@@ -558,9 +571,9 @@ export function buildHistoryFeed(state) {
       const matchesSource = filters.source === "all" || item.source === filters.source;
       const diff = daysBetween(item.date, todayLocal());
       const matchesDate = filters.datePreset === "all"
-        || (filters.datePreset === "7d" && diff <= 6)
-        || (filters.datePreset === "30d" && diff <= 29)
-        || (filters.datePreset === "90d" && diff <= 89);
+        || (filters.datePreset === "7d" && diff >= 0 && diff <= 6)
+        || (filters.datePreset === "30d" && diff >= 0 && diff <= 29)
+        || (filters.datePreset === "90d" && diff >= 0 && diff <= 89);
       return matchesQuery && matchesRoutine && matchesMuscle && matchesSource && matchesDate;
     });
 
