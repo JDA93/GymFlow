@@ -1,7 +1,7 @@
 {
-  "name": "GymFlow Pro v3",
+  "name": "GymFlow Pro v4",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio con sesión activa, cargas, medidas, progreso corporal, PRs, exportación e instalación PWA.",
+  "description": "Seguimiento de gimnasio offline con sesión serie por serie, dashboard inteligente, analíticas útiles e instalación PWA real.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

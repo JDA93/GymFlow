@@ -1,57 +1,27 @@
-const STORAGE_KEY = "gymflow-pro-v3-data";
-const TODAY = new Date().toISOString().slice(0, 10);
+const DB_NAME = "gymflow-pro-v4-db";
+const DB_VERSION = 1;
+const DB_STORE = "app_state";
+const DB_KEY = "state";
+const LEGACY_STORAGE_KEYS = ["gymflow-pro-v4-data", "gymflow-pro-v3-data"];
+const APP_VERSION = "v4";
+const FALLBACK_REST_SECONDS = 90;
 
-const defaultState = {
-  version: 3,
-  workouts: [],
-  measurements: [],
-  routines: [],
-  goals: {
-    athleteName: "",
-    weightGoal: "",
-    waistGoal: "",
-    bodyFatGoal: "",
-    benchGoal: "",
-    squatGoal: "",
-    deadliftGoal: "",
-    focusGoal: ""
-  },
-  preferences: {
-    defaultRestSeconds: 90,
-    unitSystem: "metric",
-    autoStartRest: true,
-    keepScreenAwake: false
-  },
-  session: {
-    active: false,
-    routineId: "",
-    startedAt: "",
-    completedExerciseIds: [],
-    entries: []
-  },
-  ui: {
-    activeTab: "dashboard",
-    editingWorkoutId: "",
-    editingRoutineId: "",
-    editingMeasurementId: "",
-    dashboardExercise: "",
-    dashboardMetric: "bodyWeight",
-    logSearch: "",
-    logRoutine: "all",
-    logSort: "date_desc"
-  }
-};
-
-let state = loadState();
+let db = null;
+let state = null;
+let saveTimeout = null;
+let saveInFlight = Promise.resolve();
 let deferredPrompt = null;
 let restTimerInterval = null;
 let restRemaining = 0;
 let wakeLock = null;
+let sessionDurationInterval = null;
+let pwaRegistration = null;
 
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
 const els = {
+  appShell: $("#appShell"),
   networkBadge: $("#networkBadge"),
   installBtn: $("#installBtn"),
   iosInstallBtn: $("#iosInstallBtn"),
@@ -65,6 +35,7 @@ const els = {
   refreshAppBtn: $("#refreshAppBtn"),
   updateBanner: $("#updateBanner"),
   dashboardExerciseSelect: $("#dashboardExerciseSelect"),
+  dashboardExerciseMetricSelect: $("#dashboardExerciseMetricSelect"),
   dashboardMetricSelect: $("#dashboardMetricSelect"),
   todayFocus: $("#todayFocus"),
   quickStartList: $("#quickStartList"),
@@ -84,6 +55,9 @@ const els = {
   workoutForm: $("#workoutForm"),
   cancelWorkoutEditBtn: $("#cancelWorkoutEditBtn"),
   activeSessionCard: $("#activeSessionCard"),
+  sessionStatusLabel: $("#sessionStatusLabel"),
+  sessionDurationLabel: $("#sessionDurationLabel"),
+  sessionVolumeLabel: $("#sessionVolumeLabel"),
   startSessionBtn: $("#startSessionBtn"),
   endSessionBtn: $("#endSessionBtn"),
   startRestBtn: $("#startRestBtn"),
@@ -111,28 +85,83 @@ const els = {
   pwaStatusBox: $("#pwaStatusBox"),
   iosInstallDialog: $("#iosInstallDialog"),
   closeIosDialogBtn: $("#closeIosDialogBtn"),
-  exerciseSuggestions: $("#exerciseSuggestions")
+  exerciseSuggestions: $("#exerciseSuggestions"),
+  toastRegion: $("#toastRegion")
 };
 
-init();
+const defaultState = () => ({
+  version: 4,
+  workouts: [],
+  measurements: [],
+  routines: [],
+  sessionHistory: [],
+  goals: {
+    athleteName: "",
+    weightGoal: "",
+    waistGoal: "",
+    bodyFatGoal: "",
+    benchGoal: "",
+    squatGoal: "",
+    deadliftGoal: "",
+    focusGoal: ""
+  },
+  preferences: {
+    defaultRestSeconds: 90,
+    suggestionIncrement: 2.5,
+    autoStartRest: true,
+    keepScreenAwake: false,
+    showWarmupsInLogs: true
+  },
+  session: {
+    active: false,
+    sessionId: "",
+    routineId: "",
+    startedAt: "",
+    endedAt: "",
+    completedExerciseIds: [],
+    currentExerciseId: "",
+    notes: "",
+    setEntries: []
+  },
+  ui: {
+    activeTab: "dashboard",
+    editingWorkoutId: "",
+    editingRoutineId: "",
+    editingMeasurementId: "",
+    dashboardExercise: "",
+    dashboardExerciseMetric: "weight",
+    dashboardMetric: "bodyWeight",
+    logSearch: "",
+    logRoutine: "all",
+    logSort: "date_desc"
+  }
+});
 
-function init() {
+boot();
+
+async function boot() {
   bindEvents();
+  setupPwa();
+  state = await loadState();
   ensureMinimumData();
   setDefaultDates();
-  setupPwa();
   restoreTab();
   renderAll();
   updateNetworkStatus();
+  startSessionDurationTicker();
 }
 
 function bindEvents() {
-  $$(".tab").forEach((tab) => tab.addEventListener("click", () => setActiveTab(tab.dataset.tab)));
+  $$(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => setActiveTab(tab.dataset.tab));
+    tab.addEventListener("keydown", handleTabKeydown);
+  });
 
   els.startTodayBtn.addEventListener("click", () => {
     setActiveTab("session");
     els.sessionRoutineSelect.focus();
   });
+
   els.goToSessionBtn.addEventListener("click", () => setActiveTab("session"));
   els.loadDemoBtn.addEventListener("click", loadDemoData);
   els.resetBtn.addEventListener("click", resetAllData);
@@ -140,6 +169,7 @@ function bindEvents() {
   els.exportBtn.addEventListener("click", exportJson);
   els.exportCsvBtn.addEventListener("click", exportCsv);
   els.importInput.addEventListener("change", importJson);
+
   els.installBtn.addEventListener("click", installApp);
   els.iosInstallBtn.addEventListener("click", () => els.iosInstallDialog.showModal());
   els.closeIosDialogBtn.addEventListener("click", () => els.iosInstallDialog.close());
@@ -147,16 +177,22 @@ function bindEvents() {
 
   els.dashboardExerciseSelect.addEventListener("change", (event) => {
     state.ui.dashboardExercise = event.target.value;
-    persistAndRender(false);
+    persistState({ render: true });
   });
+
+  els.dashboardExerciseMetricSelect.addEventListener("change", (event) => {
+    state.ui.dashboardExerciseMetric = event.target.value;
+    persistState({ render: true });
+  });
+
   els.dashboardMetricSelect.addEventListener("change", (event) => {
     state.ui.dashboardMetric = event.target.value;
-    persistAndRender(false);
+    persistState({ render: true });
   });
 
   els.startSessionBtn.addEventListener("click", startSession);
   els.endSessionBtn.addEventListener("click", endSession);
-  els.startRestBtn.addEventListener("click", () => startRestTimer(Number(state.preferences.defaultRestSeconds || 90)));
+  els.startRestBtn.addEventListener("click", () => startRestTimer(Number(state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)));
   els.stopRestBtn.addEventListener("click", stopRestTimer);
 
   els.workoutForm.addEventListener("submit", saveWorkoutFromForm);
@@ -168,15 +204,17 @@ function bindEvents() {
 
   els.logSearchInput.addEventListener("input", (event) => {
     state.ui.logSearch = event.target.value;
-    persistAndRender(false);
+    persistState({ render: true, save: false });
   });
+
   els.logRoutineFilter.addEventListener("change", (event) => {
     state.ui.logRoutine = event.target.value;
-    persistAndRender(false);
+    persistState({ render: true, save: false });
   });
+
   els.logSortSelect.addEventListener("change", (event) => {
     state.ui.logSort = event.target.value;
-    persistAndRender(false);
+    persistState({ render: true, save: false });
   });
 
   els.measurementForm.addEventListener("submit", saveMeasurementFromForm);
@@ -186,21 +224,122 @@ function bindEvents() {
 
   window.addEventListener("online", updateNetworkStatus);
   window.addEventListener("offline", updateNetworkStatus);
+
   document.addEventListener("visibilitychange", async () => {
-    if (document.visibilityState === "visible" && state.preferences.keepScreenAwake && state.session.active) {
+    if (document.visibilityState === "visible" && state?.preferences.keepScreenAwake && state?.session.active) {
       await requestWakeLock();
     }
   });
 }
 
-function loadState() {
+async function loadState() {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(defaultState);
-    return mergeDeep(structuredClone(defaultState), JSON.parse(raw));
-  } catch {
-    return structuredClone(defaultState);
+    db = await openDb();
+    const saved = await idbGet(DB_KEY);
+    if (saved) return migrateState(saved);
+  } catch (error) {
+    console.error("No se pudo abrir IndexedDB", error);
   }
+
+  for (const key of LEGACY_STORAGE_KEYS) {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) return migrateState(JSON.parse(raw));
+    } catch (error) {
+      console.warn("No se pudo leer almacenamiento legado", key, error);
+    }
+  }
+
+  return defaultState();
+}
+
+function migrateState(rawState) {
+  const base = mergeDeep(defaultState(), rawState || {});
+  base.version = 4;
+  base.sessionHistory = Array.isArray(base.sessionHistory) ? base.sessionHistory : [];
+  base.workouts = Array.isArray(base.workouts) ? base.workouts : [];
+  base.measurements = Array.isArray(base.measurements) ? base.measurements : [];
+  base.routines = Array.isArray(base.routines) ? base.routines : [];
+
+  base.workouts = base.workouts.map((item) => ({
+    id: item.id || uid(),
+    date: item.date || todayLocal(),
+    routineId: item.routineId || "",
+    sessionId: item.sessionId || "",
+    exercise: String(item.exercise || "").trim(),
+    weight: Number(item.weight || 0),
+    sets: Number(item.sets || 1),
+    reps: Number(item.reps || 0),
+    rpe: item.rpe === "" || item.rpe == null ? "" : Number(item.rpe),
+    rest: item.rest === "" || item.rest == null ? "" : Number(item.rest),
+    tempo: String(item.tempo || "").trim(),
+    notes: String(item.notes || "").trim(),
+    isWarmup: Boolean(item.isWarmup),
+    source: item.source || "manual",
+    createdAt: item.createdAt || item.loggedAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || item.loggedAt || new Date().toISOString()
+  }));
+
+  base.measurements = base.measurements.map((item) => ({
+    id: item.id || uid(),
+    date: item.date || todayLocal(),
+    bodyWeight: numOrBlank(item.bodyWeight),
+    bodyFat: numOrBlank(item.bodyFat),
+    waist: numOrBlank(item.waist),
+    chest: numOrBlank(item.chest),
+    arm: numOrBlank(item.arm),
+    thigh: numOrBlank(item.thigh),
+    hips: numOrBlank(item.hips),
+    neck: numOrBlank(item.neck),
+    sleepHours: numOrBlank(item.sleepHours),
+    notes: String(item.notes || "").trim(),
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
+  }));
+
+  base.routines = base.routines.map((routine) => ({
+    id: routine.id || uid(),
+    name: String(routine.name || "").trim(),
+    day: String(routine.day || "").trim(),
+    focus: String(routine.focus || "").trim(),
+    notes: String(routine.notes || "").trim(),
+    exercises: (routine.exercises || []).map((exercise) => ({
+      id: exercise.id || uid(),
+      name: String(exercise.name || "").trim(),
+      sets: Number(exercise.sets || 0),
+      reps: String(exercise.reps || "").trim(),
+      rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)
+    }))
+  }));
+
+  base.session = {
+    active: Boolean(base.session?.active),
+    sessionId: base.session?.sessionId || uid(),
+    routineId: base.session?.routineId || "",
+    startedAt: base.session?.startedAt || "",
+    endedAt: base.session?.endedAt || "",
+    completedExerciseIds: Array.isArray(base.session?.completedExerciseIds) ? [...new Set(base.session.completedExerciseIds)] : [],
+    currentExerciseId: base.session?.currentExerciseId || "",
+    notes: String(base.session?.notes || ""),
+    setEntries: Array.isArray(base.session?.setEntries) ? base.session.setEntries.map((entry) => ({
+      id: entry.id || uid(),
+      exerciseId: entry.exerciseId || "",
+      exerciseName: entry.exerciseName || "",
+      weight: Number(entry.weight || 0),
+      reps: Number(entry.reps || 0),
+      rpe: entry.rpe === "" || entry.rpe == null ? "" : Number(entry.rpe),
+      rest: entry.rest === "" || entry.rest == null ? "" : Number(entry.rest),
+      isWarmup: Boolean(entry.isWarmup),
+      createdAt: entry.createdAt || new Date().toISOString()
+    })) : []
+  };
+
+  base.ui.dashboardExerciseMetric = base.ui.dashboardExerciseMetric || "weight";
+  base.ui.dashboardMetric = base.ui.dashboardMetric || "bodyWeight";
+  base.ui.logRoutine = base.ui.logRoutine || "all";
+  base.ui.logSort = base.ui.logSort || "date_desc";
+
+  return base;
 }
 
 function mergeDeep(target, source) {
@@ -215,46 +354,45 @@ function mergeDeep(target, source) {
   return target;
 }
 
-function persistAndRender(render = true) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  if (render) renderAll();
-}
-
 function ensureMinimumData() {
   if (!state.routines.length) {
-    state.routines = [
-      {
-        id: uid(),
-        name: "Torso",
-        day: "Día A",
-        focus: "Hipertrofia",
-        notes: "Base inicial",
-        exercises: [
-          { id: uid(), name: "Press banca", sets: 4, reps: "6-8", rest: 120 },
-          { id: uid(), name: "Remo con barra", sets: 4, reps: "8-10", rest: 90 },
-          { id: uid(), name: "Press militar", sets: 3, reps: "8-10", rest: 90 }
-        ]
-      },
-      {
-        id: uid(),
-        name: "Pierna",
-        day: "Día B",
-        focus: "Fuerza + hipertrofia",
-        notes: "Prioridad en básicos",
-        exercises: [
-          { id: uid(), name: "Sentadilla", sets: 4, reps: "5-6", rest: 150 },
-          { id: uid(), name: "Peso muerto rumano", sets: 3, reps: "8-10", rest: 120 },
-          { id: uid(), name: "Prensa", sets: 3, reps: "10-12", rest: 90 }
-        ]
-      }
-    ];
-    persistAndRender(false);
+    state.routines = starterRoutines();
+    queueSave();
   }
 }
 
+function starterRoutines() {
+  return [
+    {
+      id: uid(),
+      name: "Torso",
+      day: "Día A",
+      focus: "Hipertrofia",
+      notes: "Base inicial del bloque",
+      exercises: [
+        { id: uid(), name: "Press banca", sets: 4, reps: "6-8", rest: 120 },
+        { id: uid(), name: "Remo con barra", sets: 4, reps: "8-10", rest: 90 },
+        { id: uid(), name: "Press militar", sets: 3, reps: "8-10", rest: 90 }
+      ]
+    },
+    {
+      id: uid(),
+      name: "Pierna",
+      day: "Día B",
+      focus: "Fuerza + hipertrofia",
+      notes: "Prioridad en básicos",
+      exercises: [
+        { id: uid(), name: "Sentadilla", sets: 4, reps: "5-6", rest: 150 },
+        { id: uid(), name: "Peso muerto rumano", sets: 3, reps: "8-10", rest: 120 },
+        { id: uid(), name: "Prensa", sets: 3, reps: "10-12", rest: 90 }
+      ]
+    }
+  ];
+}
+
 function setDefaultDates() {
-  if (els.workoutForm.date) els.workoutForm.date.value = TODAY;
-  if (els.measurementForm.date) els.measurementForm.date.value = TODAY;
+  if (els.workoutForm.date) els.workoutForm.date.value = todayLocal();
+  if (els.measurementForm.date) els.measurementForm.date.value = todayLocal();
 }
 
 function restoreTab() {
@@ -262,10 +400,36 @@ function restoreTab() {
 }
 
 function setActiveTab(tabId, save = true) {
-  $$(".tab").forEach((tab) => tab.classList.toggle("active", tab.dataset.tab === tabId));
-  $$(".tab-panel").forEach((panel) => panel.classList.toggle("active", panel.id === tabId));
+  $$(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === tabId;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  });
+
+  $$(".tab-panel").forEach((panel) => {
+    const active = panel.id === tabId;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+
   state.ui.activeTab = tabId;
-  if (save) persistAndRender(false);
+  if (save) persistState({ render: false });
+}
+
+function handleTabKeydown(event) {
+  const tabs = $$(".tab");
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  if (currentIndex < 0) return;
+
+  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    const nextIndex = event.key === "ArrowRight"
+      ? (currentIndex + 1) % tabs.length
+      : (currentIndex - 1 + tabs.length) % tabs.length;
+    tabs[nextIndex].focus();
+    setActiveTab(tabs[nextIndex].dataset.tab);
+  }
 }
 
 function renderAll() {
@@ -287,58 +451,61 @@ function renderAll() {
   renderGoalForm();
   renderPreferencesForm();
   renderPwaStatus();
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 }
 
 function populateRoutineSelects() {
-  const options = [`<option value="">Selecciona rutina</option>`]
-    .concat(state.routines.map((routine) => `<option value="${routine.id}">${escapeHtml(routine.name)}</option>`))
-    .join("");
-
-  els.sessionRoutineSelect.innerHTML = options;
-  els.workoutRoutineSelect.innerHTML = `<option value="">Sin rutina</option>${state.routines.map((routine) => `<option value="${routine.id}">${escapeHtml(routine.name)}</option>`).join("")}`;
-  els.logRoutineFilter.innerHTML = `<option value="all">Todas las rutinas</option>${state.routines.map((routine) => `<option value="${routine.id}">${escapeHtml(routine.name)}</option>`).join("")}`;
+  const routineOptions = state.routines.map((routine) => `<option value="${escapeHtml(routine.id)}">${escapeHtml(routine.name)}</option>`).join("");
+  els.sessionRoutineSelect.innerHTML = `<option value="">Selecciona rutina</option>${routineOptions}`;
+  els.workoutRoutineSelect.innerHTML = `<option value="">Sin rutina</option>${routineOptions}`;
+  els.logRoutineFilter.innerHTML = `<option value="all">Todas las rutinas</option>${routineOptions}`;
 
   els.sessionRoutineSelect.value = state.session.routineId || "";
   els.logRoutineFilter.value = state.ui.logRoutine || "all";
 }
 
 function populateExerciseSuggestions() {
-  const names = [...new Set(state.workouts.map((item) => item.exercise).concat(state.routines.flatMap((routine) => routine.exercises.map((exercise) => exercise.name))))]
+  const names = [...new Set(
+    state.workouts.map((item) => item.exercise)
+      .concat(state.routines.flatMap((routine) => routine.exercises.map((exercise) => exercise.name)))
+  )]
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b, "es"));
 
   els.exerciseSuggestions.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}"></option>`).join("");
 
-  const exerciseSelect = els.dashboardExerciseSelect;
   if (!names.length) {
-    exerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
+    els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
     state.ui.dashboardExercise = "";
     return;
   }
+
   if (!state.ui.dashboardExercise || !names.includes(state.ui.dashboardExercise)) {
     state.ui.dashboardExercise = names[0];
   }
-  exerciseSelect.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
-  exerciseSelect.value = state.ui.dashboardExercise;
-  els.dashboardMetricSelect.value = state.ui.dashboardMetric;
+
+  els.dashboardExerciseSelect.innerHTML = names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+  els.dashboardExerciseSelect.value = state.ui.dashboardExercise;
+  els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "weight";
+  els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
 }
 
 function renderStats() {
-  const workouts = [...state.workouts].sort(sortByDateDesc);
+  const workoutDates = getUniqueWorkoutDates();
   const measurements = [...state.measurements].sort(sortByDateDesc);
-  const monthPrefix = TODAY.slice(0, 7);
-  const uniqueDays = new Set(workouts.filter((item) => item.date.startsWith(monthPrefix)).map((item) => item.date));
+  const monthPrefix = todayLocal().slice(0, 7);
+  const sessionsThisMonth = workoutDates.filter((date) => date.startsWith(monthPrefix)).length;
   const latestMeasurement = measurements[0];
-  const bestLift = workouts.reduce((best, item) => !best || Number(item.weight) > Number(best.weight) ? item : best, null);
-  const bestE1rm = workouts.reduce((best, item) => {
-    const value = estimateE1RM(item.weight, item.reps);
-    if (!best || value > best.value) return { value, item };
-    return best;
-  }, null);
+  const bestLift = state.workouts.reduce((best, item) => !best || Number(item.weight) > Number(best.weight) ? item : best, null);
+  const bestE1rm = state.workouts
+    .filter((item) => !item.isWarmup)
+    .reduce((best, item) => {
+      const value = estimateE1RM(item.weight, item.reps);
+      if (!best || value > best.value) return { value, item };
+      return best;
+    }, null);
 
-  els.statSessionsMonth.textContent = uniqueDays.size;
-  els.statStreak.textContent = String(computeStreak(workouts));
+  els.statSessionsMonth.textContent = sessionsThisMonth;
+  els.statStreak.textContent = String(computeStreak(workoutDates));
   els.statWeight.textContent = latestMeasurement?.bodyWeight ? `${formatNumber(latestMeasurement.bodyWeight)} kg` : "—";
   els.statBestLift.textContent = bestLift ? `${formatNumber(bestLift.weight)} kg` : "—";
   els.statBestLiftLabel.textContent = bestLift ? bestLift.exercise : "Sin datos";
@@ -347,42 +514,43 @@ function renderStats() {
 }
 
 function renderTodayFocus() {
-  const container = els.todayFocus;
-  const latestWorkout = [...state.workouts].sort(sortByDateDesc)[0];
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
-  const routine = state.routines.find((item) => item.id === state.session.routineId) || state.routines[0];
   const cards = [];
+  const suggestion = getSuggestedRoutine();
+  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
+  const latestActivity = buildRecentActivityCards().slice(0, 1)[0];
+  const stalledExercise = detectPotentialStall();
 
-  if (state.session.active && routine) {
-    const completed = state.session.completedExerciseIds.length;
+  if (state.session.active) {
+    const routine = getActiveRoutine();
+    const workingSets = state.session.setEntries.filter((item) => !item.isWarmup);
     cards.push(cardHtml({
-      title: `Sesión abierta: ${routine.name}`,
-      subtitle: `Llevas ${completed} de ${routine.exercises.length} ejercicios marcados.`,
+      title: `Sigue con ${routine?.name || "tu sesión"}`,
+      subtitle: `${workingSets.length} series efectivas guardadas · ${formatDuration(getSessionDurationSeconds())} de duración.`,
       chips: [
-        { label: `Empezó ${formatShortDateTime(state.session.startedAt)}`, type: "success" },
-        { label: "Ve a Sesión para seguir", type: "ghost" }
+        { label: `${state.session.completedExerciseIds.length}/${routine?.exercises.length || 0} ejercicios completos`, type: "success" },
+        { label: `Volumen ${formatNumber(calcVolumeFromEntries(state.session.setEntries))} kg`, type: "ghost" }
       ],
       extraClass: "highlight"
     }));
-  } else if (routine) {
+  } else if (suggestion.routine) {
     cards.push(cardHtml({
-      title: `Siguiente mejor acción: ${routine.name}`,
-      subtitle: `Tu rutina sugerida para hoy tiene ${routine.exercises.length} ejercicios y enfoque ${routine.focus || "general"}.`,
+      title: `Te conviene hacer ${suggestion.routine.name}`,
+      subtitle: suggestion.reason,
       chips: [
-        { label: routine.day || "Sin bloque", type: "ghost" },
-        { label: "Pulsa Entrenar ahora", type: "success" }
+        { label: suggestion.routine.day || "Sin bloque", type: "ghost" },
+        { label: suggestion.daysSince == null ? "Aún no la has usado" : `${suggestion.daysSince} días desde la última vez`, type: suggestion.daysSince != null && suggestion.daysSince >= 4 ? "warning" : "success" }
       ],
       extraClass: "highlight"
     }));
   }
 
-  if (latestWorkout) {
+  if (stalledExercise) {
     cards.push(cardHtml({
-      title: `Último entreno: ${latestWorkout.exercise}`,
-      subtitle: `${formatDate(latestWorkout.date)} · ${formatNumber(latestWorkout.weight)} kg × ${latestWorkout.reps} reps × ${latestWorkout.sets} series`,
+      title: `Vigila ${stalledExercise.exercise}`,
+      subtitle: `La progresión reciente parece plana en las últimas ${stalledExercise.points} referencias.`,
       chips: [
-        { label: `e1RM ${formatNumber(estimateE1RM(latestWorkout.weight, latestWorkout.reps))} kg`, type: "warning" },
-        { label: `Volumen ${formatNumber(calcVolume(latestWorkout))}`, type: "ghost" }
+        { label: `Último e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
+        { label: "Prueba variar reps o descanso", type: "ghost" }
       ]
     }));
   }
@@ -397,27 +565,33 @@ function renderTodayFocus() {
     }));
   }
 
+  if (latestActivity) {
+    cards.push(latestActivity);
+  }
+
   if (!cards.length) {
-    container.innerHTML = emptyHtml("Todavía no hay datos. Carga la demo o crea tu primer registro.");
+    els.todayFocus.innerHTML = emptyHtml("Todavía no hay datos. Carga la demo o crea tu primer registro.");
     return;
   }
-  container.innerHTML = cards.join("");
+
+  els.todayFocus.innerHTML = cards.join("");
 }
 
 function renderQuickStart() {
-  const container = els.quickStartList;
   if (!state.routines.length) {
-    container.innerHTML = emptyHtml("Crea una rutina para ver accesos rápidos.");
+    els.quickStartList.innerHTML = emptyHtml("Crea una rutina para ver accesos rápidos.");
     return;
   }
-  container.innerHTML = state.routines.slice(0, 4).map((routine) => `
+
+  const lastDateByRoutine = computeLastDateByRoutine();
+  els.quickStartList.innerHTML = state.routines.slice(0, 4).map((routine) => `
     <article class="list-item">
       <div class="list-head">
         <div>
-          <h4 class="list-title">${escapeHtml(routine.name)}</h4>
-          <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")}</p>
+          <h3 class="list-title">${escapeHtml(routine.name)}</h3>
+          <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")} · ${routine.exercises.length} ejercicios</p>
         </div>
-        <span class="chip ghost">${routine.exercises.length} ejercicios</span>
+        <span class="chip ghost">${lastDateByRoutine[routine.id] ? `Último ${formatDate(lastDateByRoutine[routine.id])}` : "Aún sin usar"}</span>
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="start-routine" data-id="${routine.id}">Iniciar</button>
@@ -425,54 +599,118 @@ function renderQuickStart() {
       </div>
     </article>
   `).join("");
+
   bindActionButtons();
 }
 
 function renderRecentLogs() {
-  const recent = [...state.workouts].sort(sortByDateDesc).slice(0, 5);
-  els.recentLogs.innerHTML = recent.length ? recent.map((item) => cardHtml({
-    title: item.exercise,
-    subtitle: `${formatDate(item.date)} · ${formatNumber(item.weight)} kg × ${item.reps} × ${item.sets}`,
+  const cards = buildRecentActivityCards();
+  els.recentLogs.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
+}
+
+function buildRecentActivityCards() {
+  const grouped = buildWorkoutGroups({ includeWarmups: false }).slice(0, 5);
+  const items = grouped.map((group) => cardHtml({
+    title: group.exercise,
+    subtitle: `${formatDate(group.date)} · ${group.sourceLabel} · ${group.setCount} series · ${formatNumber(group.maxWeight)} kg top`,
     chips: [
-      { label: `e1RM ${formatNumber(estimateE1RM(item.weight, item.reps))} kg`, type: "warning" },
-      { label: `Volumen ${formatNumber(calcVolume(item))}`, type: "ghost" },
-      ...(item.notes ? [{ label: item.notes.slice(0, 40), type: "ghost" }] : [])
+      { label: `Volumen ${formatNumber(group.volume)} kg`, type: "ghost" },
+      { label: `e1RM ${formatNumber(group.bestE1rm)} kg`, type: "warning" },
+      ...(group.routineName ? [{ label: group.routineName, type: "ghost" }] : [])
     ]
-  })).join("") : emptyHtml("Aún no hay registros.");
+  }));
+
+  const sessions = [...state.sessionHistory]
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .slice(0, 2)
+    .map((item) => cardHtml({
+      title: item.routineName || "Sesión finalizada",
+      subtitle: `${formatDate(item.date)} · ${item.exercisesCompleted} ejercicios · ${item.totalSets} series`,
+      chips: [
+        { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
+        { label: `Volumen ${formatNumber(item.volume)} kg`, type: "success" }
+      ]
+    }));
+
+  return [...sessions, ...items].slice(0, 5);
 }
 
 function renderExerciseChart() {
   const exercise = state.ui.dashboardExercise;
-  const logs = state.workouts.filter((item) => item.exercise === exercise).sort(sortByDateAsc).slice(-10);
-  els.exerciseChart.innerHTML = logs.length >= 2 ? buildLineChart(logs.map((item) => ({ label: shortLabel(item.date), value: Number(item.weight) })), "kg") : emptyHtml("Necesitas al menos 2 registros del mismo ejercicio.");
+  const metric = state.ui.dashboardExerciseMetric || "weight";
+  const points = buildExerciseChartPoints(exercise, metric);
+  const suffix = metric === "volume" ? "kg" : metric === "reps" ? "reps" : "kg";
+  const metricLabel = {
+    weight: "Carga máxima",
+    e1rm: "e1RM",
+    volume: "Volumen",
+    reps: "Repeticiones"
+  }[metric] || "Carga";
+
+  els.exerciseChart.innerHTML = points.length >= 2
+    ? buildLineChart(points, suffix, `${metricLabel} · ${exercise}`)
+    : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
+}
+
+function buildExerciseChartPoints(exercise, metric) {
+  if (!exercise) return [];
+  const groups = groupBy(
+    state.workouts.filter((item) => item.exercise === exercise && !item.isWarmup),
+    (item) => item.date
+  );
+
+  return Object.entries(groups)
+    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+    .slice(-12)
+    .map(([date, logs]) => {
+      let value = 0;
+      if (metric === "weight") value = Math.max(...logs.map((item) => Number(item.weight || 0)));
+      if (metric === "e1rm") value = Math.max(...logs.map((item) => estimateE1RM(item.weight, item.reps)));
+      if (metric === "volume") value = logs.reduce((sum, item) => sum + calcVolume(item), 0);
+      if (metric === "reps") value = Math.max(...logs.map((item) => Number(item.reps || 0)));
+      return { label: shortLabel(date), value };
+    })
+    .filter((point) => Number.isFinite(point.value));
 }
 
 function renderBodyChart() {
-  const metric = state.ui.dashboardMetric;
+  const metric = state.ui.dashboardMetric || "bodyWeight";
   const logs = state.measurements
     .filter((item) => item[metric] !== "" && item[metric] != null)
     .sort(sortByDateAsc)
-    .slice(-10)
+    .slice(-12)
     .map((item) => ({ label: shortLabel(item.date), value: Number(item[metric]) }));
+
   const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? "h" : metric === "bodyWeight" ? "kg" : "cm";
-  els.bodyChart.innerHTML = logs.length >= 2 ? buildLineChart(logs, suffix) : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
+
+  els.bodyChart.innerHTML = logs.length >= 2
+    ? buildLineChart(logs, suffix, `Evolución de ${metric}`)
+    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
 }
 
 function renderSession() {
-  const routine = state.routines.find((item) => item.id === state.session.routineId);
-  if (!state.session.active || !routine) {
+  const routine = getActiveRoutine();
+  const active = state.session.active && routine;
+  const durationSeconds = getSessionDurationSeconds();
+
+  els.sessionStatusLabel.textContent = active ? routine.name : "Sin sesión";
+  els.sessionDurationLabel.textContent = formatDuration(durationSeconds);
+  els.sessionVolumeLabel.textContent = `${formatNumber(calcVolumeFromEntries(state.session.setEntries))} kg`;
+
+  if (!active) {
     els.activeSessionCard.innerHTML = `<p class="empty">Selecciona una rutina e inicia la sesión para ver tus ejercicios aquí.</p>`;
     return;
   }
 
   const completed = state.session.completedExerciseIds.length;
   const progress = routine.exercises.length ? Math.round((completed / routine.exercises.length) * 100) : 0;
+
   const header = `
     <div class="list-item highlight">
       <div class="list-head">
         <div>
-          <h4 class="list-title">${escapeHtml(routine.name)}</h4>
-          <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")}</p>
+          <h3 class="list-title">${escapeHtml(routine.name)}</h3>
+          <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")} · Empezó ${formatShortDateTime(state.session.startedAt)}</p>
         </div>
         <span class="chip success">${completed}/${routine.exercises.length} completados</span>
       </div>
@@ -484,30 +722,45 @@ function renderSession() {
   `;
 
   const cards = routine.exercises.map((exercise, index) => {
-    const last = getLastWorkoutByExercise(exercise.name);
-    const completedItem = state.session.completedExerciseIds.includes(exercise.id);
-    const suggestion = last ? nextLoadSuggestion(last.weight, last.reps) : null;
+    const previous = getExerciseReference(exercise.name);
+    const entries = getSessionEntriesByExercise(exercise.id);
+    const isCompleted = state.session.completedExerciseIds.includes(exercise.id) || entries.filter((item) => !item.isWarmup).length >= Number(exercise.sets || 0);
+    const suggestion = nextLoadSuggestionForExercise(exercise.name);
+    const workingEntries = entries.filter((item) => !item.isWarmup);
+    const restDefault = exercise.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+
     return `
-      <article class="session-exercise ${completedItem ? "completed" : ""}">
+      <article class="session-exercise ${isCompleted ? "completed" : ""}">
         <div class="session-exercise-top">
           <div>
-            <h4 class="list-title">${index + 1}. ${escapeHtml(exercise.name)}</h4>
-            <p class="list-subtitle">${exercise.sets || "—"} series · ${escapeHtml(String(exercise.reps || "—"))} reps · descanso ${exercise.rest || state.preferences.defaultRestSeconds}s</p>
+            <h3 class="list-title">${index + 1}. ${escapeHtml(exercise.name)}</h3>
+            <p class="list-subtitle">${exercise.sets || "—"} series objetivo · ${escapeHtml(String(exercise.reps || "—"))} reps · descanso ${restDefault}s</p>
           </div>
-          <button class="ghost small" data-action="toggle-complete-exercise" data-id="${exercise.id}">${completedItem ? "Desmarcar" : "Completar"}</button>
+          <button class="ghost small" data-action="toggle-complete-exercise" data-id="${exercise.id}">
+            ${isCompleted ? "Desmarcar" : "Completar"}
+          </button>
         </div>
+
         <div class="chip-row">
-          <span class="chip ghost">Último peso: ${last ? `${formatNumber(last.weight)} kg` : "—"}</span>
+          <span class="chip ghost">Último top set: ${previous ? `${formatNumber(previous.weight)} kg × ${previous.reps}` : "—"}</span>
           <span class="chip warning">Siguiente carga: ${suggestion ? `${formatNumber(suggestion)} kg` : "Empieza cómodo"}</span>
-          <span class="chip ghost">e1RM top: ${last ? `${formatNumber(estimateE1RM(last.weight, last.reps))} kg` : "—"}</span>
+          <span class="chip ghost">e1RM top: ${previous ? `${formatNumber(estimateE1RM(previous.weight, previous.reps))} kg` : "—"}</span>
+          <span class="chip ghost">Series guardadas: ${workingEntries.length}</span>
         </div>
+
         <div class="session-series-row">
-          <input type="number" step="0.5" placeholder="Kg" id="session-weight-${exercise.id}" value="${last?.weight || ""}" />
-          <input type="number" step="1" placeholder="Series" id="session-sets-${exercise.id}" value="${exercise.sets || ""}" />
-          <input type="number" step="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${extractMainRep(exercise.reps)}" />
-          <input type="number" min="0" step="15" placeholder="Descanso" id="session-rest-${exercise.id}" value="${exercise.rest || state.preferences.defaultRestSeconds}" />
-          <button data-action="save-session-set" data-id="${exercise.id}">Guardar</button>
+          <input type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${exercise.id}" value="${previous?.weight ?? ""}" />
+          <input type="number" step="1" min="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${extractMainRep(exercise.reps)}" />
+          <input type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${exercise.id}" value="" />
+          <input type="number" min="0" step="15" placeholder="Descanso" id="session-rest-${exercise.id}" value="${restDefault}" />
+          <label class="switch-row">
+            <input type="checkbox" id="session-warmup-${exercise.id}" />
+            <span>Warm-up</span>
+          </label>
+          <button data-action="add-session-set" data-id="${exercise.id}">Guardar serie</button>
         </div>
+
+        ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}
       </article>
     `;
   }).join("");
@@ -516,22 +769,55 @@ function renderSession() {
   bindActionButtons();
 }
 
+function buildSessionTable(entries) {
+  return `
+    <div class="session-table-wrap">
+      <table class="session-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Tipo</th>
+            <th>Peso</th>
+            <th>Reps</th>
+            <th>RPE</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${entries.map((entry, index) => `
+            <tr>
+              <td>${index + 1}</td>
+              <td>${entry.isWarmup ? "Warm-up" : "Efectiva"}</td>
+              <td>${formatNumber(entry.weight)} kg</td>
+              <td>${entry.reps}</td>
+              <td>${entry.rpe === "" ? "—" : entry.rpe}</td>
+              <td><button class="ghost small" data-action="delete-session-set" data-id="${entry.id}">Quitar</button></td>
+            </tr>
+          `).join("")}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function renderRoutines() {
   if (!state.routines.length) {
     els.routineList.innerHTML = emptyHtml("No hay rutinas todavía.");
     return;
   }
+
+  const lastDateByRoutine = computeLastDateByRoutine();
   els.routineList.innerHTML = state.routines.map((routine) => `
     <article class="list-item">
       <div class="list-head">
         <div>
-          <h4 class="list-title">${escapeHtml(routine.name)}</h4>
+          <h3 class="list-title">${escapeHtml(routine.name)}</h3>
           <p class="list-subtitle">${escapeHtml(routine.day || "Sin bloque")} · ${escapeHtml(routine.focus || "Sin foco")}</p>
         </div>
-        <span class="chip ghost">${routine.exercises.length} ejercicios</span>
+        <span class="chip ghost">${lastDateByRoutine[routine.id] ? `Último ${formatDate(lastDateByRoutine[routine.id])}` : "Aún sin usar"}</span>
       </div>
       <div class="chip-row">
-        ${routine.exercises.slice(0, 5).map((exercise) => `<span class="chip ghost">${escapeHtml(exercise.name)}</span>`).join("")}
+        ${routine.exercises.slice(0, 6).map((exercise) => `<span class="chip ghost">${escapeHtml(exercise.name)}</span>`).join("")}
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
@@ -541,64 +827,121 @@ function renderRoutines() {
       </div>
     </article>
   `).join("");
+
   bindActionButtons();
 }
 
 function renderWorkoutList() {
   const query = (state.ui.logSearch || "").trim().toLowerCase();
-  const filtered = state.workouts.filter((item) => {
-    const matchExercise = !query || item.exercise.toLowerCase().includes(query);
-    const matchRoutine = state.ui.logRoutine === "all" || item.routineId === state.ui.logRoutine;
-    return matchExercise && matchRoutine;
-  }).sort(getWorkoutSorter(state.ui.logSort));
+  const groups = buildWorkoutGroups({ includeWarmups: state.preferences.showWarmupsInLogs })
+    .filter((group) => {
+      const matchExercise = !query || group.exercise.toLowerCase().includes(query);
+      const matchRoutine = state.ui.logRoutine === "all" || group.routineId === state.ui.logRoutine;
+      return matchExercise && matchRoutine;
+    })
+    .sort(getWorkoutGroupSorter(state.ui.logSort));
 
-  if (!filtered.length) {
+  if (!groups.length) {
     els.workoutList.innerHTML = emptyHtml("No hay registros con esos filtros.");
     return;
   }
 
-  els.workoutList.innerHTML = filtered.map((item) => {
-    const routine = state.routines.find((routineItem) => routineItem.id === item.routineId);
-    return `
-      <article class="list-item">
-        <div class="list-head">
-          <div>
-            <h4 class="list-title">${escapeHtml(item.exercise)}</h4>
-            <p class="list-subtitle">${formatDate(item.date)}${routine ? ` · ${escapeHtml(routine.name)}` : ""}</p>
-          </div>
-          <span class="chip ghost">${formatNumber(item.weight)} kg</span>
+  els.workoutList.innerHTML = groups.map((group) => `
+    <article class="list-item">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${escapeHtml(group.exercise)}</h3>
+          <p class="list-subtitle">${formatDate(group.date)}${group.routineName ? ` · ${escapeHtml(group.routineName)}` : ""} · ${group.sourceLabel}</p>
         </div>
-        <div class="chip-row">
-          <span class="chip ghost">${item.sets} series</span>
-          <span class="chip ghost">${item.reps} reps</span>
-          <span class="chip warning">e1RM ${formatNumber(estimateE1RM(item.weight, item.reps))} kg</span>
-          <span class="chip ghost">Volumen ${formatNumber(calcVolume(item))}</span>
-        </div>
-        <div class="actions-row">
-          <button class="ghost small" data-action="edit-workout" data-id="${item.id}">Editar</button>
-          <button class="ghost small" data-action="delete-workout" data-id="${item.id}">Borrar</button>
-        </div>
-      </article>
-    `;
-  }).join("");
+        <span class="chip ghost">${formatNumber(group.maxWeight)} kg top</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ghost">${group.setCount} series</span>
+        <span class="chip ghost">${group.repsLabel}</span>
+        <span class="chip warning">e1RM ${formatNumber(group.bestE1rm)} kg</span>
+        <span class="chip ghost">Volumen ${formatNumber(group.volume)} kg</span>
+        ${group.containsWarmup ? `<span class="chip ghost">Incluye warm-up</span>` : ""}
+      </div>
+      <div class="actions-row">
+        ${group.isEditable ? `<button class="ghost small" data-action="edit-workout" data-id="${group.primaryId}">Editar</button>` : ""}
+        <button class="ghost small" data-action="delete-workout-group" data-id="${group.groupId}">Borrar bloque</button>
+      </div>
+    </article>
+  `).join("");
+
   bindActionButtons();
 }
 
+function buildWorkoutGroups({ includeWarmups = true } = {}) {
+  const routineMap = Object.fromEntries(state.routines.map((routine) => [routine.id, routine]));
+  const filtered = state.workouts.filter((item) => includeWarmups || !item.isWarmup);
+
+  const groups = new Map();
+
+  filtered.forEach((item) => {
+    const groupKey = item.sessionId
+      ? `session|${item.sessionId}|${item.exercise}`
+      : `manual|${item.id}`;
+
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        groupId: groupKey,
+        primaryId: item.id,
+        exercise: item.exercise,
+        date: item.date,
+        routineId: item.routineId || "",
+        routineName: routineMap[item.routineId]?.name || "",
+        source: item.source || "manual",
+        sourceLabel: item.sessionId ? "Desde sesión" : "Registro manual",
+        setCount: 0,
+        repsList: [],
+        maxWeight: 0,
+        volume: 0,
+        bestE1rm: 0,
+        entries: [],
+        containsWarmup: false,
+        isEditable: !item.sessionId
+      });
+    }
+
+    const group = groups.get(groupKey);
+    group.entries.push(item);
+    group.setCount += Number(item.sets || 1);
+    group.repsList.push(Number(item.reps || 0));
+    group.maxWeight = Math.max(group.maxWeight, Number(item.weight || 0));
+    group.volume += calcVolume(item);
+    group.bestE1rm = Math.max(group.bestE1rm, estimateE1RM(item.weight, item.reps));
+    group.containsWarmup = group.containsWarmup || item.isWarmup;
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      repsLabel: buildRepsLabel(group.repsList)
+    }))
+    .sort(sortWorkoutGroupsByDateDesc);
+}
+
 function renderPrList() {
-  const grouped = groupBy(state.workouts, (item) => item.exercise);
+  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exercise);
   const exercises = Object.keys(grouped).sort((a, b) => a.localeCompare(b, "es"));
+
   if (!exercises.length) {
     els.prList.innerHTML = emptyHtml("Sin datos todavía.");
     return;
   }
+
   els.prList.innerHTML = exercises.map((exercise) => {
     const logs = grouped[exercise];
     const bestWeight = logs.reduce((best, item) => Number(item.weight) > Number(best.weight) ? item : best, logs[0]);
     const bestE1rm = logs.reduce((best, item) => estimateE1RM(item.weight, item.reps) > estimateE1RM(best.weight, best.reps) ? item : best, logs[0]);
+    const bestVolume = logs.reduce((best, item) => calcVolume(item) > calcVolume(best) ? item : best, logs[0]);
+
     return cardHtml({
       title: exercise,
-      subtitle: `PR carga ${formatNumber(bestWeight.weight)} kg · PR e1RM ${formatNumber(estimateE1RM(bestE1rm.weight, bestE1rm.reps))} kg`,
+      subtitle: `Carga ${formatNumber(bestWeight.weight)} kg · e1RM ${formatNumber(estimateE1RM(bestE1rm.weight, bestE1rm.reps))} kg`,
       chips: [
+        { label: `Top volumen ${formatNumber(calcVolume(bestVolume))} kg`, type: "ghost" },
         { label: `Último ${formatDate(logs.sort(sortByDateDesc)[0].date)}`, type: "ghost" }
       ]
     });
@@ -607,11 +950,12 @@ function renderPrList() {
 
 function renderMeasurements() {
   const measurements = [...state.measurements].sort(sortByDateDesc);
+
   els.measurementList.innerHTML = measurements.length ? measurements.map((item) => `
     <article class="list-item">
       <div class="list-head">
         <div>
-          <h4 class="list-title">${formatDate(item.date)}</h4>
+          <h3 class="list-title">${formatDate(item.date)}</h3>
           <p class="list-subtitle">Peso ${item.bodyWeight ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Grasa ${item.bodyFat ? `${formatNumber(item.bodyFat)} %` : "—"}</p>
         </div>
       </div>
@@ -628,20 +972,31 @@ function renderMeasurements() {
       </div>
     </article>
   `).join("") : emptyHtml("Todavía no hay mediciones.");
+
   bindActionButtons();
 }
 
 function renderAnalytics() {
-  const grouped = groupBy(state.workouts, (item) => item.exercise);
+  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exercise);
+
   const volumeCards = Object.entries(grouped)
-    .map(([exercise, logs]) => ({ exercise, volume: logs.reduce((sum, item) => sum + calcVolume(item), 0), sessions: logs.length }))
-    .sort((a, b) => b.volume - a.volume)
+    .map(([exercise, logs]) => {
+      const totalVolume = logs.reduce((sum, item) => sum + calcVolume(item), 0);
+      const averageWeight = logs.reduce((sum, item) => sum + Number(item.weight || 0), 0) / Math.max(logs.length, 1);
+      const last30Volume = logs.filter((item) => daysBetween(item.date, todayLocal()) <= 29).reduce((sum, item) => sum + calcVolume(item), 0);
+      return { exercise, totalVolume, averageWeight, last30Volume, sessions: logs.length };
+    })
+    .sort((a, b) => b.totalVolume - a.totalVolume)
     .slice(0, 8)
     .map((item) => cardHtml({
       title: item.exercise,
-      subtitle: `Volumen total ${formatNumber(item.volume)} · ${item.sessions} registros`,
-      chips: [{ label: "Carga acumulada", type: "ghost" }]
+      subtitle: `Volumen total ${formatNumber(item.totalVolume)} kg · peso medio ${formatNumber(item.averageWeight)} kg`,
+      chips: [
+        { label: `Últimos 30 días ${formatNumber(item.last30Volume)} kg`, type: "ghost" },
+        { label: `${item.sessions} registros`, type: "ghost" }
+      ]
     }));
+
   els.volumeSummary.innerHTML = volumeCards.length ? volumeCards.join("") : emptyHtml("Sin datos de volumen todavía.");
 
   const trendItems = buildTrendItems();
@@ -650,15 +1005,25 @@ function renderAnalytics() {
 }
 
 function buildTrendItems() {
-  const workouts = [...state.workouts].sort(sortByDateDesc);
-  const measurements = [...state.measurements].sort(sortByDateDesc);
-  const uniqueDays = [...new Set(workouts.map((item) => item.date))];
-  const last7 = uniqueDays.filter((date) => daysBetween(date, TODAY) <= 6).length;
-  const last30 = uniqueDays.filter((date) => daysBetween(date, TODAY) <= 29).length;
-  const latestWeight = measurements[0]?.bodyWeight;
-  const oldestWeight = [...measurements].sort(sortByDateAsc)[0]?.bodyWeight;
-  const weightDelta = latestWeight && oldestWeight ? Number(latestWeight) - Number(oldestWeight) : null;
-  const mostFrequentExercise = Object.entries(groupBy(workouts, (item) => item.exercise)).sort((a, b) => b[1].length - a[1].length)[0];
+  const workoutDates = getUniqueWorkoutDates();
+  const last7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 6).length;
+  const last30 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 29).length;
+  const weeklyVolume = state.workouts
+    .filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= 6)
+    .reduce((sum, item) => sum + calcVolume(item), 0);
+  const previousWeeklyVolume = state.workouts
+    .filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13)
+    .reduce((sum, item) => sum + calcVolume(item), 0);
+  const volumeDelta = weeklyVolume - previousWeeklyVolume;
+
+  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
+  const firstMeasurement = [...state.measurements].sort(sortByDateAsc)[0];
+  const weightDelta = latestMeasurement?.bodyWeight !== "" && firstMeasurement?.bodyWeight !== ""
+    ? Number(latestMeasurement?.bodyWeight || 0) - Number(firstMeasurement?.bodyWeight || 0)
+    : null;
+
+  const mostFrequentExercise = Object.entries(groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exercise))
+    .sort((a, b) => b[1].length - a[1].length)[0];
 
   return [
     {
@@ -667,14 +1032,19 @@ function buildTrendItems() {
       chips: [{ label: last7 >= 3 ? "Buen ritmo" : "Se puede apretar", type: last7 >= 3 ? "success" : "warning" }]
     },
     {
+      title: "Volumen semanal",
+      subtitle: `Llevas ${formatNumber(weeklyVolume)} kg en 7 días. Diferencia vs semana previa: ${volumeDelta >= 0 ? "+" : ""}${formatNumber(volumeDelta)} kg.`,
+      chips: [{ label: volumeDelta >= 0 ? "Subiendo carga total" : "Semana más ligera", type: volumeDelta >= 0 ? "success" : "ghost" }]
+    },
+    {
       title: "Racha actual",
-      subtitle: `Tu racha real es de ${computeStreak(workouts)} días con continuidad activa.`,
-      chips: [{ label: workouts.length ? `Último entreno ${formatDate(workouts[0].date)}` : "Sin entrenos", type: "ghost" }]
+      subtitle: `Tu racha real es de ${computeStreak(workoutDates)} días con continuidad activa.`,
+      chips: [{ label: workoutDates[0] ? `Último entreno ${formatDate(workoutDates[0])}` : "Sin entrenos", type: "ghost" }]
     },
     {
       title: "Peso corporal",
-      subtitle: weightDelta == null ? "Aún no hay suficiente histórico para medir tendencia." : `Cambio acumulado ${weightDelta >= 0 ? "+" : ""}${formatNumber(weightDelta)} kg desde tu primera medición guardada.`,
-      chips: [{ label: latestWeight ? `Actual ${formatNumber(latestWeight)} kg` : "Sin peso actual", type: "ghost" }]
+      subtitle: weightDelta == null ? "Aún no hay suficiente histórico para medir tendencia." : `Cambio acumulado ${weightDelta >= 0 ? "+" : ""}${formatNumber(weightDelta)} kg desde tu primera medición.`,
+      chips: [{ label: latestMeasurement?.bodyWeight ? `Actual ${formatNumber(latestMeasurement.bodyWeight)} kg` : "Sin peso actual", type: "ghost" }]
     },
     {
       title: "Ejercicio más trabajado",
@@ -687,44 +1057,109 @@ function buildTrendItems() {
 function renderGoalSummary() {
   const goals = state.goals;
   const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
+  const oldestMeasurement = [...state.measurements].sort(sortByDateAsc)[0];
   const bestMap = computeBestLiftMap();
+  const firstLiftMap = computeFirstLiftMap();
+
   const cards = [];
 
   if (goals.focusGoal) {
-    cards.push(cardHtml({ title: "Meta principal del bloque", subtitle: goals.focusGoal, chips: [{ label: goals.athleteName || "Atleta", type: "ghost" }] }));
+    cards.push(cardHtml({
+      title: "Meta principal del bloque",
+      subtitle: goals.focusGoal,
+      chips: [{ label: goals.athleteName || "Atleta", type: "ghost" }]
+    }));
   }
+
   if (goals.weightGoal) {
-    cards.push(goalCard("Peso", latestMeasurement?.bodyWeight, goals.weightGoal, "kg"));
+    cards.push(goalCard({
+      label: "Peso",
+      currentValue: latestMeasurement?.bodyWeight,
+      targetValue: goals.weightGoal,
+      baselineValue: oldestMeasurement?.bodyWeight,
+      suffix: "kg"
+    }));
   }
+
   if (goals.waistGoal) {
-    cards.push(goalCard("Cintura", latestMeasurement?.waist, goals.waistGoal, "cm"));
+    cards.push(goalCard({
+      label: "Cintura",
+      currentValue: latestMeasurement?.waist,
+      targetValue: goals.waistGoal,
+      baselineValue: oldestMeasurement?.waist,
+      suffix: "cm"
+    }));
   }
+
   if (goals.bodyFatGoal) {
-    cards.push(goalCard("Grasa corporal", latestMeasurement?.bodyFat, goals.bodyFatGoal, "%"));
+    cards.push(goalCard({
+      label: "Grasa corporal",
+      currentValue: latestMeasurement?.bodyFat,
+      targetValue: goals.bodyFatGoal,
+      baselineValue: oldestMeasurement?.bodyFat,
+      suffix: "%"
+    }));
   }
+
   if (goals.benchGoal) {
-    cards.push(goalCard("Press banca", bestMap["Press banca"], goals.benchGoal, "kg"));
+    cards.push(goalCard({
+      label: "Press banca",
+      currentValue: bestMap["Press banca"],
+      targetValue: goals.benchGoal,
+      baselineValue: firstLiftMap["Press banca"],
+      suffix: "kg"
+    }));
   }
+
   if (goals.squatGoal) {
-    cards.push(goalCard("Sentadilla", bestMap["Sentadilla"], goals.squatGoal, "kg"));
+    cards.push(goalCard({
+      label: "Sentadilla",
+      currentValue: bestMap["Sentadilla"],
+      targetValue: goals.squatGoal,
+      baselineValue: firstLiftMap["Sentadilla"],
+      suffix: "kg"
+    }));
   }
+
   if (goals.deadliftGoal) {
-    cards.push(goalCard("Peso muerto", bestMap["Peso muerto"] || bestMap["Peso muerto rumano"], goals.deadliftGoal, "kg"));
+    cards.push(goalCard({
+      label: "Peso muerto",
+      currentValue: bestMap["Peso muerto"] || bestMap["Peso muerto rumano"],
+      targetValue: goals.deadliftGoal,
+      baselineValue: firstLiftMap["Peso muerto"] || firstLiftMap["Peso muerto rumano"],
+      suffix: "kg"
+    }));
   }
+
   els.goalSummary.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no has definido objetivos.");
 }
 
-function goalCard(label, currentValue, targetValue, suffix) {
-  const current = currentValue ? Number(currentValue) : null;
+function goalCard({ label, currentValue, targetValue, baselineValue, suffix }) {
+  const current = currentValue === "" || currentValue == null ? null : Number(currentValue);
   const target = Number(targetValue);
+  const baseline = baselineValue === "" || baselineValue == null ? null : Number(baselineValue);
+
   const delta = current == null ? null : target - current;
-  return cardHtml({
-    title: label,
-    subtitle: current == null ? `Objetivo ${formatNumber(target)} ${suffix}. Aún no hay valor actual.` : `Actual ${formatNumber(current)} ${suffix} · Objetivo ${formatNumber(target)} ${suffix}`,
-    chips: [
-      { label: delta == null ? "Sin referencia actual" : `Te faltan ${formatNumber(Math.abs(delta))} ${suffix}`, type: delta == null ? "ghost" : Math.abs(delta) < 2 ? "success" : "warning" }
-    ]
-  });
+  const progress = computeGoalProgress({ baseline, current, target });
+
+  return `
+    <article class="list-item">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${escapeHtml(label)}</h3>
+          <p class="list-subtitle">${current == null ? `Objetivo ${formatNumber(target)} ${suffix}. Aún no hay valor actual.` : `Actual ${formatNumber(current)} ${suffix} · Objetivo ${formatNumber(target)} ${suffix}`}</p>
+        </div>
+        <span class="chip ${progress >= 100 ? "success" : progress >= 70 ? "warning" : "ghost"}">${formatNumber(progress)}%</span>
+      </div>
+      <div class="goal-progress">
+        <div class="goal-progress-bar"><span style="width:${Math.min(progress, 100)}%"></span></div>
+        <div class="goal-progress-meta">
+          <span>${baseline == null ? "Sin referencia inicial" : `Inicio ${formatNumber(baseline)} ${suffix}`}</span>
+          <span>${delta == null ? "Sin valor actual" : `${delta > 0 ? "Te faltan" : "Ya superado por"} ${formatNumber(Math.abs(delta))} ${suffix}`}</span>
+        </div>
+      </div>
+    </article>
+  `;
 }
 
 function renderGoalForm() {
@@ -734,36 +1169,69 @@ function renderGoalForm() {
 }
 
 function renderPreferencesForm() {
-  const pref = state.preferences;
-  Object.entries(pref).forEach(([key, value]) => {
+  Object.entries(state.preferences).forEach(([key, value]) => {
     if (!els.preferencesForm[key]) return;
-    if (typeof value === "boolean") {
-      els.preferencesForm[key].checked = value;
-    } else {
-      els.preferencesForm[key].value = value;
-    }
+    if (typeof value === "boolean") els.preferencesForm[key].checked = value;
+    else els.preferencesForm[key].value = value;
   });
 }
 
-function renderPwaStatus() {
+async function renderPwaStatus() {
   const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
-  const swReady = "serviceWorker" in navigator;
+  const standalone = isStandaloneMode();
+  const swSupported = "serviceWorker" in navigator;
+  const registration = swSupported ? (pwaRegistration || await navigator.serviceWorker.getRegistration()) : null;
+  const controlled = Boolean(navigator.serviceWorker?.controller);
+  const updateReady = Boolean(registration?.waiting);
+  const manifestPresent = Boolean(document.querySelector('link[rel="manifest"]'));
+
   const items = [
-    { title: "Manifest", subtitle: "Detectado y cargado desde la app.", chips: [{ label: "OK", type: "success" }] },
-    { title: "Service worker", subtitle: swReady ? "Disponible en este navegador." : "No soportado en este navegador.", chips: [{ label: swReady ? "Activo" : "No soportado", type: swReady ? "success" : "warning" }] },
-    { title: "Modo instalación", subtitle: standalone ? "La app ya parece instalada." : ios ? "En iPhone se instala desde Compartir > Añadir a pantalla de inicio." : "En Android/Chrome puede aparecer el botón Instalar app o en el menú del navegador.", chips: [{ label: standalone ? "Instalada" : "Pendiente", type: standalone ? "success" : "ghost" }] }
+    {
+      title: "Manifest",
+      subtitle: manifestPresent ? "Enlazado en el documento y listo para instalación." : "No se ha encontrado el manifest.",
+      chips: [{ label: manifestPresent ? "OK" : "Falta", type: manifestPresent ? "success" : "danger" }]
+    },
+    {
+      title: "Service worker",
+      subtitle: !swSupported
+        ? "Este navegador no soporta service worker."
+        : registration
+          ? controlled ? "Registrado y controlando la página." : "Registrado, pero aún no controla esta pestaña."
+          : "Aún no hay registro activo.",
+      chips: [{ label: !swSupported ? "No soportado" : registration ? (controlled ? "Activo" : "Registrado") : "Pendiente", type: !swSupported ? "warning" : registration ? (controlled ? "success" : "warning") : "danger" }]
+    },
+    {
+      title: "Estado de instalación",
+      subtitle: standalone
+        ? "La app ya está ejecutándose como instalada."
+        : ios
+          ? "En iPhone debes usar Compartir > Añadir a pantalla de inicio."
+          : deferredPrompt
+            ? "El navegador ya permite lanzar la instalación desde el botón."
+            : "Publica la app y abre desde navegador compatible para ver la instalación.",
+      chips: [{ label: standalone ? "Instalada" : deferredPrompt ? "Lista para instalar" : "Pendiente", type: standalone ? "success" : deferredPrompt ? "warning" : "ghost" }]
+    },
+    {
+      title: "Actualización disponible",
+      subtitle: updateReady ? "Hay una versión nueva esperando activación." : "No se detectan actualizaciones pendientes.",
+      chips: [{ label: updateReady ? "Actualizar" : "Al día", type: updateReady ? "warning" : "success" }]
+    }
   ];
+
   els.pwaStatusBox.innerHTML = items.map((item) => cardHtml(item)).join("");
 }
 
 function saveWorkoutFromForm(event) {
   event.preventDefault();
   const form = new FormData(els.workoutForm);
+  const editingId = state.ui.editingWorkoutId;
+  const previous = editingId ? state.workouts.find((item) => item.id === editingId) : null;
+
   const record = {
-    id: state.ui.editingWorkoutId || uid(),
-    date: form.get("date") || TODAY,
+    id: editingId || uid(),
+    date: form.get("date") || todayLocal(),
     routineId: form.get("routineId") || "",
+    sessionId: "",
     exercise: String(form.get("exercise") || "").trim(),
     weight: Number(form.get("weight") || 0),
     sets: Number(form.get("sets") || 0),
@@ -772,7 +1240,10 @@ function saveWorkoutFromForm(event) {
     rest: form.get("rest") ? Number(form.get("rest")) : "",
     tempo: String(form.get("tempo") || "").trim(),
     notes: String(form.get("notes") || "").trim(),
-    createdAt: new Date().toISOString()
+    isWarmup: false,
+    source: "manual",
+    createdAt: previous?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
   if (!record.exercise || !record.weight || !record.sets || !record.reps) {
@@ -787,20 +1258,22 @@ function saveWorkoutFromForm(event) {
   els.workoutForm.reset();
   setDefaultDates();
   cancelWorkoutEdit();
-  persistAndRender();
+  persistState({ render: true });
   toast(index >= 0 ? "Registro actualizado." : "Registro guardado.");
 }
 
 function saveRoutineFromForm(event) {
   event.preventDefault();
   const form = new FormData(els.routineForm);
-  const exercises = [...els.exerciseRows.querySelectorAll(".exercise-row")].map((row) => ({
-    id: row.dataset.id || uid(),
-    name: row.querySelector('[data-field="name"]').value.trim(),
-    sets: Number(row.querySelector('[data-field="sets"]').value || 0),
-    reps: row.querySelector('[data-field="reps"]').value.trim(),
-    rest: Number(row.querySelector('[data-field="rest"]').value || 0)
-  })).filter((item) => item.name);
+  const exercises = [...els.exerciseRows.querySelectorAll(".exercise-row")]
+    .map((row) => ({
+      id: row.dataset.id || uid(),
+      name: row.querySelector('[data-field="name"]').value.trim(),
+      sets: Number(row.querySelector('[data-field="sets"]').value || 0),
+      reps: row.querySelector('[data-field="reps"]').value.trim(),
+      rest: Number(row.querySelector('[data-field="rest"]').value || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)
+    }))
+    .filter((item) => item.name);
 
   if (!form.get("name") || !exercises.length) {
     toast("Pon nombre a la rutina y al menos un ejercicio.");
@@ -824,16 +1297,19 @@ function saveRoutineFromForm(event) {
   els.exerciseRows.innerHTML = "";
   addExerciseRow();
   cancelRoutineEdit();
-  persistAndRender();
+  persistState({ render: true });
   toast(index >= 0 ? "Rutina actualizada." : "Rutina guardada.");
 }
 
 function saveMeasurementFromForm(event) {
   event.preventDefault();
   const form = new FormData(els.measurementForm);
+  const editingId = state.ui.editingMeasurementId;
+  const previous = editingId ? state.measurements.find((item) => item.id === editingId) : null;
+
   const record = {
-    id: state.ui.editingMeasurementId || uid(),
-    date: form.get("date") || TODAY,
+    id: editingId || uid(),
+    date: form.get("date") || todayLocal(),
     bodyWeight: numOrBlank(form.get("bodyWeight")),
     bodyFat: numOrBlank(form.get("bodyFat")),
     waist: numOrBlank(form.get("waist")),
@@ -843,10 +1319,12 @@ function saveMeasurementFromForm(event) {
     hips: numOrBlank(form.get("hips")),
     neck: numOrBlank(form.get("neck")),
     sleepHours: numOrBlank(form.get("sleepHours")),
-    notes: String(form.get("notes") || "").trim()
+    notes: String(form.get("notes") || "").trim(),
+    createdAt: previous?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
   };
 
-  const hasMetric = Object.entries(record).some(([key, value]) => !["id", "date", "notes"].includes(key) && value !== "");
+  const hasMetric = Object.entries(record).some(([key, value]) => !["id", "date", "notes", "createdAt", "updatedAt"].includes(key) && value !== "");
   if (!hasMetric) {
     toast("Añade al menos una métrica corporal.");
     return;
@@ -859,7 +1337,7 @@ function saveMeasurementFromForm(event) {
   els.measurementForm.reset();
   setDefaultDates();
   cancelMeasurementEdit();
-  persistAndRender();
+  persistState({ render: true });
   toast(index >= 0 ? "Medición actualizada." : "Medición guardada.");
 }
 
@@ -869,17 +1347,18 @@ function saveGoals(event) {
   Object.keys(state.goals).forEach((key) => {
     state.goals[key] = form.get(key) || "";
   });
-  persistAndRender();
+  persistState({ render: true });
   toast("Objetivos guardados.");
 }
 
 function savePreferences(event) {
   event.preventDefault();
-  state.preferences.defaultRestSeconds = Number(els.preferencesForm.defaultRestSeconds.value || 90);
-  state.preferences.unitSystem = els.preferencesForm.unitSystem.value;
+  state.preferences.defaultRestSeconds = Number(els.preferencesForm.defaultRestSeconds.value || FALLBACK_REST_SECONDS);
+  state.preferences.suggestionIncrement = Number(els.preferencesForm.suggestionIncrement.value || 2.5);
   state.preferences.autoStartRest = els.preferencesForm.autoStartRest.checked;
   state.preferences.keepScreenAwake = els.preferencesForm.keepScreenAwake.checked;
-  persistAndRender();
+  state.preferences.showWarmupsInLogs = els.preferencesForm.showWarmupsInLogs.checked;
+  persistState({ render: true });
   toast("Preferencias guardadas.");
   if (!state.preferences.keepScreenAwake) releaseWakeLock();
 }
@@ -891,7 +1370,7 @@ function addExerciseRow(data = {}) {
   row.querySelector('[data-field="name"]').value = data.name || "";
   row.querySelector('[data-field="sets"]').value = data.sets || "";
   row.querySelector('[data-field="reps"]').value = data.reps || "";
-  row.querySelector('[data-field="rest"]').value = data.rest || state.preferences.defaultRestSeconds;
+  row.querySelector('[data-field="rest"]').value = data.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
   row.querySelector(".remove-row").addEventListener("click", () => row.remove());
   els.exerciseRows.appendChild(fragment);
 }
@@ -919,25 +1398,17 @@ function cancelMeasurementEdit() {
 }
 
 function bindActionButtons() {
-  $$('[data-action]').forEach((button) => {
+  $$("[data-action]").forEach((button) => {
     button.onclick = () => handleAction(button.dataset.action, button.dataset.id);
   });
 }
 
 function handleAction(action, id) {
   switch (action) {
-    case "start-routine": {
-      state.session.routineId = id;
-      state.session.active = true;
-      state.session.startedAt = new Date().toISOString();
-      state.session.completedExerciseIds = [];
-      state.session.entries = [];
-      persistAndRender();
-      setActiveTab("session");
-      requestWakeLock();
-      toast("Sesión iniciada.");
+    case "start-routine":
+      beginSessionFromRoutine(id);
       break;
-    }
+
     case "edit-routine": {
       const routine = state.routines.find((item) => item.id === id);
       if (!routine) return;
@@ -953,6 +1424,7 @@ function handleAction(action, id) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       break;
     }
+
     case "duplicate-routine": {
       const routine = state.routines.find((item) => item.id === id);
       if (!routine) return;
@@ -961,18 +1433,20 @@ function handleAction(action, id) {
       clone.name = `${routine.name} copia`;
       clone.exercises = clone.exercises.map((exercise) => ({ ...exercise, id: uid() }));
       state.routines.push(clone);
-      persistAndRender();
+      persistState({ render: true });
       toast("Rutina duplicada.");
       break;
     }
+
     case "delete-routine": {
       if (!confirm("¿Borrar esta rutina?")) return;
       state.routines = state.routines.filter((item) => item.id !== id);
-      if (state.session.routineId === id) endSession(false);
-      persistAndRender();
+      if (state.session.routineId === id) cancelActiveSession(true);
+      persistState({ render: true });
       toast("Rutina borrada.");
       break;
     }
+
     case "edit-workout": {
       const item = state.workouts.find((workout) => workout.id === id);
       if (!item) return;
@@ -985,13 +1459,16 @@ function handleAction(action, id) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       break;
     }
-    case "delete-workout": {
-      if (!confirm("¿Borrar este registro?")) return;
-      state.workouts = state.workouts.filter((item) => item.id !== id);
-      persistAndRender();
-      toast("Registro borrado.");
+
+    case "delete-workout-group": {
+      if (!confirm("¿Borrar este bloque de entrenamiento?")) return;
+      const toDelete = resolveGroupEntries(id);
+      state.workouts = state.workouts.filter((item) => !toDelete.includes(item.id));
+      persistState({ render: true });
+      toast("Bloque borrado.");
       break;
     }
+
     case "edit-measurement": {
       const item = state.measurements.find((measurement) => measurement.id === id);
       if (!item) return;
@@ -1004,24 +1481,31 @@ function handleAction(action, id) {
       window.scrollTo({ top: 0, behavior: "smooth" });
       break;
     }
+
     case "delete-measurement": {
       if (!confirm("¿Borrar esta medición?")) return;
       state.measurements = state.measurements.filter((item) => item.id !== id);
-      persistAndRender();
+      persistState({ render: true });
       toast("Medición borrada.");
       break;
     }
+
     case "toggle-complete-exercise": {
       const list = new Set(state.session.completedExerciseIds);
       if (list.has(id)) list.delete(id); else list.add(id);
       state.session.completedExerciseIds = [...list];
-      persistAndRender();
+      persistState({ render: true });
       break;
     }
-    case "save-session-set": {
-      saveSessionSet(id);
+
+    case "add-session-set":
+      addSessionSet(id);
       break;
-    }
+
+    case "delete-session-set":
+      deleteSessionSet(id);
+      break;
+
     default:
       break;
   }
@@ -1033,69 +1517,164 @@ function startSession() {
     toast("Selecciona una rutina.");
     return;
   }
+  beginSessionFromRoutine(routineId);
+}
+
+function beginSessionFromRoutine(routineId) {
+  if (!routineId) return;
+  if (state.session.active && state.session.routineId !== routineId && !confirm("Ya hay una sesión activa. ¿Quieres reemplazarla?")) return;
+
   state.session = {
     active: true,
+    sessionId: uid(),
     routineId,
     startedAt: new Date().toISOString(),
+    endedAt: "",
     completedExerciseIds: [],
-    entries: []
+    currentExerciseId: "",
+    notes: "",
+    setEntries: []
   };
-  persistAndRender();
+
+  persistState({ render: true });
   requestWakeLock();
+  startSessionDurationTicker();
+  setActiveTab("session");
   toast("Sesión iniciada.");
 }
 
-function endSession(showToast = true) {
+function endSession() {
+  if (!state.session.active) {
+    toast("No hay sesión activa.");
+    return;
+  }
+
+  const routine = getActiveRoutine();
+  const entries = [...state.session.setEntries];
+  const workoutRecords = entries.map((entry) => ({
+    id: uid(),
+    date: datePartFromIso(entry.createdAt) || todayLocal(),
+    routineId: state.session.routineId,
+    sessionId: state.session.sessionId,
+    exercise: entry.exerciseName || routine?.exercises.find((item) => item.id === entry.exerciseId)?.name || "Ejercicio",
+    weight: Number(entry.weight || 0),
+    sets: 1,
+    reps: Number(entry.reps || 0),
+    rpe: entry.rpe === "" ? "" : Number(entry.rpe),
+    rest: entry.rest === "" ? "" : Number(entry.rest),
+    tempo: "",
+    notes: entry.isWarmup ? "Serie de calentamiento" : "Serie guardada desde sesión",
+    isWarmup: Boolean(entry.isWarmup),
+    source: "session",
+    createdAt: entry.createdAt,
+    updatedAt: entry.createdAt
+  }));
+
+  state.workouts.push(...workoutRecords);
+
+  state.sessionHistory.push({
+    id: uid(),
+    sessionId: state.session.sessionId,
+    routineId: state.session.routineId,
+    routineName: routine?.name || "",
+    date: datePartFromIso(state.session.startedAt) || todayLocal(),
+    startedAt: state.session.startedAt,
+    endedAt: new Date().toISOString(),
+    durationSeconds: getSessionDurationSeconds(),
+    totalSets: entries.length,
+    exercisesCompleted: state.session.completedExerciseIds.length,
+    volume: calcVolumeFromEntries(entries),
+    notes: state.session.notes || ""
+  });
+
+  cancelActiveSession(false);
+  persistState({ render: true });
+  toast("Sesión guardada y cerrada.");
+}
+
+function cancelActiveSession(showToast = true) {
   state.session = {
     active: false,
+    sessionId: "",
     routineId: "",
     startedAt: "",
+    endedAt: "",
     completedExerciseIds: [],
-    entries: []
+    currentExerciseId: "",
+    notes: "",
+    setEntries: []
   };
   releaseWakeLock();
   stopRestTimer();
-  persistAndRender();
-  if (showToast) toast("Sesión cerrada.");
+  startSessionDurationTicker();
+  if (showToast) toast("Sesión cancelada.");
 }
 
-function saveSessionSet(exerciseId) {
-  const routine = state.routines.find((item) => item.id === state.session.routineId);
+function addSessionSet(exerciseId) {
+  const routine = getActiveRoutine();
   const exercise = routine?.exercises.find((item) => item.id === exerciseId);
   if (!exercise) return;
 
   const weight = Number($("#session-weight-" + CSS.escape(exerciseId)).value || 0);
-  const sets = Number($("#session-sets-" + CSS.escape(exerciseId)).value || 0);
   const reps = Number($("#session-reps-" + CSS.escape(exerciseId)).value || 0);
-  const rest = Number($("#session-rest-" + CSS.escape(exerciseId)).value || state.preferences.defaultRestSeconds);
-  if (!weight || !sets || !reps) {
-    toast("Completa peso, series y reps.");
+  const rpeRaw = $("#session-rpe-" + CSS.escape(exerciseId)).value;
+  const rest = Number($("#session-rest-" + CSS.escape(exerciseId)).value || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS);
+  const isWarmup = $("#session-warmup-" + CSS.escape(exerciseId)).checked;
+
+  if (!weight || !reps) {
+    toast("Completa peso y reps.");
     return;
   }
 
-  state.workouts.push({
+  state.session.setEntries.push({
     id: uid(),
-    date: TODAY,
-    routineId: state.session.routineId,
-    exercise: exercise.name,
+    exerciseId,
+    exerciseName: exercise.name,
     weight,
-    sets,
     reps,
-    rpe: "",
+    rpe: rpeRaw ? Number(rpeRaw) : "",
     rest,
-    tempo: "",
-    notes: "Guardado desde sesión activa",
+    isWarmup,
     createdAt: new Date().toISOString()
   });
 
-  if (!state.session.completedExerciseIds.includes(exerciseId)) {
-    state.session.completedExerciseIds.push(exerciseId);
+  if (!isWarmup) {
+    const effectiveCount = getSessionEntriesByExercise(exerciseId).filter((item) => !item.isWarmup).length;
+    if (effectiveCount >= Number(exercise.sets || 0)) {
+      const list = new Set(state.session.completedExerciseIds);
+      list.add(exerciseId);
+      state.session.completedExerciseIds = [...list];
+    }
   }
-  state.session.entries.push({ exerciseId, weight, sets, reps, rest, at: new Date().toISOString() });
 
-  persistAndRender();
-  toast(`${exercise.name} guardado.`);
+  $("#session-rpe-" + CSS.escape(exerciseId)).value = "";
+  $("#session-warmup-" + CSS.escape(exerciseId)).checked = false;
+
+  persistState({ render: true });
+  toast(`${exercise.name}: serie guardada.`);
   if (state.preferences.autoStartRest) startRestTimer(rest);
+}
+
+function deleteSessionSet(entryId) {
+  const entry = state.session.setEntries.find((item) => item.id === entryId);
+  if (!entry) return;
+  state.session.setEntries = state.session.setEntries.filter((item) => item.id !== entryId);
+
+  const routine = getActiveRoutine();
+  const exercise = routine?.exercises.find((item) => item.id === entry.exerciseId);
+  const effectiveCount = getSessionEntriesByExercise(entry.exerciseId).filter((item) => !item.isWarmup).length;
+  if (exercise && effectiveCount < Number(exercise.sets || 0)) {
+    state.session.completedExerciseIds = state.session.completedExerciseIds.filter((id) => id !== entry.exerciseId);
+  }
+
+  persistState({ render: true });
+  toast("Serie eliminada.");
+}
+
+function getSessionEntriesByExercise(exerciseId) {
+  return state.session.setEntries
+    .filter((item) => item.exerciseId === exerciseId)
+    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
 }
 
 function startRestTimer(seconds) {
@@ -1103,6 +1682,7 @@ function startRestTimer(seconds) {
   restRemaining = Number(seconds || 0);
   updateRestTimerLabel();
   if (restRemaining <= 0) return;
+
   restTimerInterval = setInterval(() => {
     restRemaining -= 1;
     updateRestTimerLabel();
@@ -1126,10 +1706,26 @@ function updateRestTimerLabel() {
   els.restTimerLabel.textContent = `${minutes}:${seconds}`;
 }
 
+function startSessionDurationTicker() {
+  clearInterval(sessionDurationInterval);
+  sessionDurationInterval = setInterval(() => {
+    if (state?.session.active) {
+      els.sessionDurationLabel.textContent = formatDuration(getSessionDurationSeconds());
+      els.sessionVolumeLabel.textContent = `${formatNumber(calcVolumeFromEntries(state.session.setEntries))} kg`;
+    }
+  }, 1000);
+}
+
+function getSessionDurationSeconds() {
+  if (!state?.session.active || !state.session.startedAt) return 0;
+  return Math.max(0, Math.floor((Date.now() - new Date(state.session.startedAt).getTime()) / 1000));
+}
+
 function loadDemoData() {
-  if (state.workouts.length || state.measurements.length) {
-    if (!confirm("Ya hay datos. ¿Quieres reemplazarlos con la demo?")) return;
+  if ((state.workouts.length || state.measurements.length || state.sessionHistory.length) && !confirm("Ya hay datos. ¿Quieres reemplazarlos con la demo?")) {
+    return;
   }
+
   const routineA = {
     id: uid(),
     name: "Upper Strength",
@@ -1142,6 +1738,7 @@ function loadDemoData() {
       { id: uid(), name: "Press militar", sets: 3, reps: "6-8", rest: 90 }
     ]
   };
+
   const routineB = {
     id: uid(),
     name: "Lower Power",
@@ -1155,23 +1752,62 @@ function loadDemoData() {
     ]
   };
 
-  state = structuredClone(defaultState);
+  state = defaultState();
   state.routines = [routineA, routineB];
+
+  const session1 = uid();
+  const session2 = uid();
+
   state.workouts = [
-    workoutDemo(TODAY, routineA.id, "Press banca", 80, 4, 6),
-    workoutDemo(offsetDate(TODAY, -3), routineA.id, "Press banca", 77.5, 4, 6),
-    workoutDemo(offsetDate(TODAY, -7), routineA.id, "Press banca", 75, 4, 6),
-    workoutDemo(offsetDate(TODAY, -10), routineA.id, "Press militar", 45, 3, 8),
-    workoutDemo(offsetDate(TODAY, -13), routineB.id, "Sentadilla", 110, 4, 5),
-    workoutDemo(offsetDate(TODAY, -17), routineB.id, "Sentadilla", 105, 4, 5),
-    workoutDemo(offsetDate(TODAY, -20), routineB.id, "Prensa", 180, 3, 10),
-    workoutDemo(offsetDate(TODAY, -24), routineA.id, "Dominadas lastradas", 15, 4, 6)
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Press banca", 80, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Press banca", 80, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Press banca", 77.5, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Dominadas lastradas", 15, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Dominadas lastradas", 15, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, "Press militar", 45, 1, 8),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, "Sentadilla", 110, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, "Sentadilla", 110, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, "Prensa", 180, 1, 10),
+    workoutDemo(offsetDate(todayLocal(), -8), routineA.id, "", "Press banca", 75, 4, 6, "manual")
   ];
+
   state.measurements = [
-    measurementDemo(TODAY, 81.2, 14.4, 82.5, 104, 39.2, 59.5, 97.5, 38.2, 7.2),
-    measurementDemo(offsetDate(TODAY, -14), 81.9, 14.9, 83.1, 103.6, 39.0, 59.2, 97.9, 38.1, 7.0),
-    measurementDemo(offsetDate(TODAY, -30), 82.8, 15.6, 84.0, 103.0, 38.4, 58.8, 98.5, 38.0, 6.7)
+    measurementDemo(todayLocal(), 81.2, 14.4, 82.5, 104, 39.2, 59.5, 97.5, 38.2, 7.2),
+    measurementDemo(offsetDate(todayLocal(), -14), 81.9, 14.9, 83.1, 103.6, 39.0, 59.2, 97.9, 38.1, 7.0),
+    measurementDemo(offsetDate(todayLocal(), -30), 82.8, 15.6, 84.0, 103.0, 38.4, 58.8, 98.5, 38.0, 6.7)
   ];
+
+  state.sessionHistory = [
+    {
+      id: uid(),
+      sessionId: session1,
+      routineId: routineA.id,
+      routineName: routineA.name,
+      date: offsetDate(todayLocal(), -1),
+      startedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -1), "18:00"),
+      endedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -1), "19:08"),
+      durationSeconds: 68 * 60,
+      totalSets: 6,
+      exercisesCompleted: 3,
+      volume: 1375,
+      notes: ""
+    },
+    {
+      id: uid(),
+      sessionId: session2,
+      routineId: routineB.id,
+      routineName: routineB.name,
+      date: offsetDate(todayLocal(), -5),
+      startedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -5), "19:00"),
+      endedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -5), "20:04"),
+      durationSeconds: 64 * 60,
+      totalSets: 3,
+      exercisesCompleted: 2,
+      volume: 2000,
+      notes: ""
+    }
+  ];
+
   state.goals = {
     athleteName: "Javier",
     weightGoal: 79,
@@ -1182,55 +1818,108 @@ function loadDemoData() {
     deadliftGoal: 160,
     focusGoal: "Subir fuerza manteniendo cintura controlada"
   };
-  persistAndRender();
+
   cancelRoutineEdit();
   cancelWorkoutEdit();
   cancelMeasurementEdit();
+  persistState({ render: true });
   toast("Demo cargada.");
 }
 
-function workoutDemo(date, routineId, exercise, weight, sets, reps) {
-  return { id: uid(), date, routineId, exercise, weight, sets, reps, rpe: "", rest: 90, tempo: "", notes: "Demo", createdAt: new Date().toISOString() };
+function workoutDemo(date, routineId, sessionId, exercise, weight, sets, reps, source = "session") {
+  const createdAt = isoFromLocalDateTime(date, "19:00");
+  return {
+    id: uid(),
+    date,
+    routineId,
+    sessionId,
+    exercise,
+    weight,
+    sets,
+    reps,
+    rpe: "",
+    rest: 90,
+    tempo: "",
+    notes: "Demo",
+    isWarmup: false,
+    source,
+    createdAt,
+    updatedAt: createdAt
+  };
 }
+
 function measurementDemo(date, bodyWeight, bodyFat, waist, chest, arm, thigh, hips, neck, sleepHours) {
-  return { id: uid(), date, bodyWeight, bodyFat, waist, chest, arm, thigh, hips, neck, sleepHours, notes: "Demo" };
+  const createdAt = isoFromLocalDateTime(date, "08:00");
+  return {
+    id: uid(),
+    date,
+    bodyWeight,
+    bodyFat,
+    waist,
+    chest,
+    arm,
+    thigh,
+    hips,
+    neck,
+    sleepHours,
+    notes: "Demo",
+    createdAt,
+    updatedAt: createdAt
+  };
 }
 
 function resetAllData() {
   if (!confirm("¿Seguro que quieres borrar todos los datos?")) return;
-  localStorage.removeItem(STORAGE_KEY);
-  state = structuredClone(defaultState);
+  state = defaultState();
   ensureMinimumData();
   cancelRoutineEdit();
   cancelWorkoutEdit();
   cancelMeasurementEdit();
-  persistAndRender();
+  persistState({ render: true });
   toast("Datos reiniciados.");
 }
 
 function exportJson() {
   const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
-  downloadBlob(blob, `gymflow-backup-${TODAY}.json`);
+  downloadBlob(blob, `gymflow-pro-v4-backup-${todayLocal()}.json`);
 }
 
 function exportCsv() {
-  const workoutsCsv = toCsv(state.workouts, ["date", "routineId", "exercise", "weight", "sets", "reps", "rpe", "rest", "tempo", "notes"]);
-  const measurementsCsv = toCsv(state.measurements, ["date", "bodyWeight", "bodyFat", "waist", "chest", "arm", "thigh", "hips", "neck", "sleepHours", "notes"]);
-  const blob = new Blob([`WORKOUTS\n${workoutsCsv}\n\nMEASUREMENTS\n${measurementsCsv}`], { type: "text/csv;charset=utf-8" });
-  downloadBlob(blob, `gymflow-export-${TODAY}.csv`);
+  const workoutsCsv = toCsv(
+    state.workouts,
+    ["date", "routineId", "sessionId", "exercise", "weight", "sets", "reps", "rpe", "rest", "isWarmup", "source", "notes"]
+  );
+  const measurementsCsv = toCsv(
+    state.measurements,
+    ["date", "bodyWeight", "bodyFat", "waist", "chest", "arm", "thigh", "hips", "neck", "sleepHours", "notes"]
+  );
+  const sessionsCsv = toCsv(
+    state.sessionHistory,
+    ["date", "routineName", "durationSeconds", "totalSets", "exercisesCompleted", "volume", "notes"]
+  );
+
+  downloadBlob(new Blob([workoutsCsv], { type: "text/csv;charset=utf-8" }), `gymflow-workouts-${todayLocal()}.csv`);
+  downloadBlob(new Blob([measurementsCsv], { type: "text/csv;charset=utf-8" }), `gymflow-measurements-${todayLocal()}.csv`);
+  downloadBlob(new Blob([sessionsCsv], { type: "text/csv;charset=utf-8" }), `gymflow-sessions-${todayLocal()}.csv`);
 }
 
 function importJson(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+
   const reader = new FileReader();
   reader.onload = () => {
     try {
       const imported = JSON.parse(String(reader.result));
-      state = mergeDeep(structuredClone(defaultState), imported);
-      persistAndRender();
+      state = migrateState(imported);
+      ensureMinimumData();
+      cancelRoutineEdit();
+      cancelWorkoutEdit();
+      cancelMeasurementEdit();
+      persistState({ render: true });
       toast("Datos importados.");
-    } catch {
+    } catch (error) {
+      console.error(error);
       toast("El archivo no es válido.");
     } finally {
       els.importInput.value = "";
@@ -1242,19 +1931,27 @@ function importJson(event) {
 function setupPwa() {
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("./sw.js").then((registration) => {
+      pwaRegistration = registration;
+
       if (registration.waiting) {
         els.updateBanner.hidden = false;
       }
+
       registration.addEventListener("updatefound", () => {
         const newWorker = registration.installing;
         if (!newWorker) return;
         newWorker.addEventListener("statechange", () => {
           if (newWorker.state === "installed" && navigator.serviceWorker.controller) {
             els.updateBanner.hidden = false;
+            renderPwaStatus();
           }
         });
       });
-    }).catch(() => {});
+
+      renderPwaStatus();
+    }).catch((error) => {
+      console.error("No se pudo registrar el service worker", error);
+    });
 
     navigator.serviceWorker.addEventListener("controllerchange", () => {
       window.location.reload();
@@ -1265,9 +1962,17 @@ function setupPwa() {
     event.preventDefault();
     deferredPrompt = event;
     els.installBtn.hidden = false;
+    renderPwaStatus();
   });
 
-  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !window.matchMedia("(display-mode: standalone)").matches) {
+  window.addEventListener("appinstalled", () => {
+    deferredPrompt = null;
+    els.installBtn.hidden = true;
+    toast("App instalada.");
+    renderPwaStatus();
+  });
+
+  if (/iphone|ipad|ipod/i.test(navigator.userAgent) && !isStandaloneMode()) {
     els.iosInstallBtn.hidden = false;
   }
 }
@@ -1278,11 +1983,12 @@ async function installApp() {
   await deferredPrompt.userChoice;
   deferredPrompt = null;
   els.installBtn.hidden = true;
+  renderPwaStatus();
 }
 
 function refreshApp() {
   navigator.serviceWorker.getRegistration().then((registration) => {
-    if (registration?.waiting) registration.waiting.postMessage("SKIP_WAITING");
+    if (registration?.waiting) registration.waiting.postMessage({ type: "SKIP_WAITING" });
     else window.location.reload();
   });
 }
@@ -1297,7 +2003,9 @@ async function requestWakeLock() {
   try {
     if (!("wakeLock" in navigator) || !state.preferences.keepScreenAwake) return;
     wakeLock = await navigator.wakeLock.request("screen");
-  } catch {}
+  } catch (error) {
+    console.warn("Wake Lock no disponible", error);
+  }
 }
 
 function releaseWakeLock() {
@@ -1307,12 +2015,97 @@ function releaseWakeLock() {
   }
 }
 
-function getLastWorkoutByExercise(exercise) {
-  return state.workouts.filter((item) => item.exercise === exercise).sort(sortByDateDesc)[0] || null;
+function getActiveRoutine() {
+  return state.routines.find((item) => item.id === state.session.routineId) || null;
+}
+
+function getSuggestedRoutine() {
+  const lastDateByRoutine = computeLastDateByRoutine();
+  const ordered = [...state.routines].sort((a, b) => {
+    const dateA = lastDateByRoutine[a.id];
+    const dateB = lastDateByRoutine[b.id];
+    if (!dateA && !dateB) return 0;
+    if (!dateA) return -1;
+    if (!dateB) return 1;
+    return String(dateA).localeCompare(String(dateB));
+  });
+
+  const routine = ordered[0] || null;
+  if (!routine) return { routine: null, reason: "", daysSince: null };
+
+  const lastDate = lastDateByRoutine[routine.id] || null;
+  const daysSince = lastDate ? daysBetween(lastDate, todayLocal()) : null;
+
+  return {
+    routine,
+    daysSince,
+    reason: lastDate
+      ? `Es la rutina que llevas más tiempo sin tocar, así que tiene sentido retomarla ahora.`
+      : `Todavía no la has usado, así que es buena candidata para arrancar el bloque.`
+  };
+}
+
+function detectPotentialStall() {
+  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exercise);
+  for (const [exercise, logs] of Object.entries(grouped)) {
+    const points = logs
+      .sort(sortByDateAsc)
+      .slice(-4)
+      .map((item) => estimateE1RM(item.weight, item.reps));
+
+    if (points.length >= 4 && Math.max(...points) - Math.min(...points) <= 2) {
+      return {
+        exercise,
+        points: points.length,
+        latest: points[points.length - 1]
+      };
+    }
+  }
+  return null;
+}
+
+function computeLastDateByRoutine() {
+  return state.workouts.reduce((acc, item) => {
+    if (!item.routineId) return acc;
+    if (!acc[item.routineId] || String(item.date).localeCompare(String(acc[item.routineId])) > 0) {
+      acc[item.routineId] = item.date;
+    }
+    return acc;
+  }, {});
+}
+
+function getExerciseReference(exerciseName) {
+  return state.workouts
+    .filter((item) => item.exercise === exerciseName && !item.isWarmup)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)))[0] || null;
+}
+
+function nextLoadSuggestionForExercise(exerciseName) {
+  const logs = state.workouts
+    .filter((item) => item.exercise === exerciseName && !item.isWarmup)
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.createdAt).localeCompare(String(a.createdAt)))
+    .slice(0, 3);
+
+  if (!logs.length) return 0;
+
+  const top = logs[0];
+  const increment = Number(state.preferences.suggestionIncrement || 2.5);
+
+  if (top.reps >= extractMainRepFromLogs(logs) || top.reps >= 8) {
+    return roundToStep(Number(top.weight) + increment, 0.5);
+  }
+
+  return Number(top.weight);
+}
+
+function extractMainRepFromLogs(logs) {
+  const reps = logs.map((item) => Number(item.reps || 0)).filter(Boolean);
+  return reps.length ? Math.max(...reps) : 0;
 }
 
 function computeBestLiftMap() {
   return state.workouts.reduce((acc, item) => {
+    if (item.isWarmup) return acc;
     if (!acc[item.exercise] || Number(item.weight) > Number(acc[item.exercise])) {
       acc[item.exercise] = Number(item.weight);
     }
@@ -1320,40 +2113,66 @@ function computeBestLiftMap() {
   }, {});
 }
 
-function computeStreak(workouts) {
-  const uniqueDates = [...new Set(workouts.map((item) => item.date))].sort().reverse();
+function computeFirstLiftMap() {
+  const map = {};
+  state.workouts.forEach((item) => {
+    if (item.isWarmup) return;
+    const current = map[item.exercise];
+    if (!current || String(item.date).localeCompare(String(current.date)) < 0) {
+      map[item.exercise] = { value: Number(item.weight), date: item.date };
+    }
+  });
+
+  return Object.fromEntries(Object.entries(map).map(([key, value]) => [key, value.value]));
+}
+
+function computeStreak(workoutDates) {
+  const uniqueDates = [...workoutDates].sort().reverse();
   if (!uniqueDates.length) return 0;
-  if (daysBetween(uniqueDates[0], TODAY) > 2) return 0;
+  if (daysBetween(uniqueDates[0], todayLocal()) > 2) return 0;
+
   let streak = 1;
-  for (let i = 1; i < uniqueDates.length; i += 1) {
-    const diff = daysBetween(uniqueDates[i], uniqueDates[i - 1]);
+  for (let index = 1; index < uniqueDates.length; index += 1) {
+    const diff = daysBetween(uniqueDates[index], uniqueDates[index - 1]);
     if (diff <= 2) streak += 1;
     else break;
   }
   return streak;
 }
 
-function estimateE1RM(weight, reps) {
-  return Number(weight || 0) * (1 + Number(reps || 0) / 30);
+function getUniqueWorkoutDates() {
+  return [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))].sort().reverse();
 }
 
-function nextLoadSuggestion(weight, reps) {
-  const base = Number(weight || 0);
-  if (!base) return 0;
-  return reps >= 8 ? base + 2.5 : base + 1.25;
+function estimateE1RM(weight, reps) {
+  return Number(weight || 0) * (1 + Number(reps || 0) / 30);
 }
 
 function calcVolume(item) {
   return Number(item.weight || 0) * Number(item.reps || 0) * Number(item.sets || 0);
 }
 
-function getWorkoutSorter(sortBy) {
+function calcVolumeFromEntries(entries) {
+  return entries.reduce((sum, item) => sum + (item.isWarmup ? 0 : Number(item.weight || 0) * Number(item.reps || 0)), 0);
+}
+
+function getWorkoutGroupSorter(sortBy) {
   switch (sortBy) {
-    case "date_asc": return sortByDateAsc;
-    case "weight_desc": return (a, b) => Number(b.weight) - Number(a.weight);
-    case "exercise_asc": return (a, b) => a.exercise.localeCompare(b.exercise, "es");
-    default: return sortByDateDesc;
+    case "date_asc":
+      return (a, b) => String(a.date).localeCompare(String(b.date));
+    case "weight_desc":
+      return (a, b) => Number(b.maxWeight) - Number(a.maxWeight);
+    case "exercise_asc":
+      return (a, b) => a.exercise.localeCompare(b.exercise, "es");
+    default:
+      return sortWorkoutGroupsByDateDesc;
   }
+}
+
+function sortWorkoutGroupsByDateDesc(a, b) {
+  const dateCompare = String(b.date).localeCompare(String(a.date));
+  if (dateCompare !== 0) return dateCompare;
+  return String(b.primaryId).localeCompare(String(a.primaryId));
 }
 
 function sortByDateDesc(a, b) {
@@ -1377,6 +2196,13 @@ function numOrBlank(value) {
   return value === "" || value == null ? "" : Number(value);
 }
 
+function buildRepsLabel(repsList) {
+  const unique = [...new Set(repsList.filter(Boolean))];
+  if (!unique.length) return "Reps —";
+  if (unique.length === 1) return `${unique[0]} reps`;
+  return `${Math.min(...unique)}-${Math.max(...unique)} reps`;
+}
+
 function extractMainRep(value) {
   if (typeof value === "number") return value;
   const text = String(value || "");
@@ -1384,23 +2210,32 @@ function extractMainRep(value) {
   return match ? match[0] : "";
 }
 
-function buildLineChart(points, suffix = "") {
-  const width = 520;
-  const height = 230;
-  const padding = 26;
-  const values = points.map((item) => item.value);
+function buildLineChart(points, suffix = "", label = "gráfico de evolución") {
+  const width = 560;
+  const height = 240;
+  const padding = 28;
+  const values = points.map((item) => Number(item.value));
   const min = Math.min(...values);
   const max = Math.max(...values);
   const range = max - min || 1;
   const stepX = (width - padding * 2) / Math.max(points.length - 1, 1);
+
   const coords = points.map((point, index) => {
     const x = padding + index * stepX;
     const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
     return { ...point, x, y };
   });
+
   const path = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
+
+  const gridLines = [0, .25, .5, .75, 1].map((ratio) => {
+    const y = padding + ratio * (height - padding * 2);
+    return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="#e7ebf2" stroke-width="1" />`;
+  }).join("");
+
   return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="gráfico de evolución">
+    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">
+      ${gridLines}
       <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#cdd5df" stroke-width="1" />
       <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#cdd5df" stroke-width="1" />
       <path d="${path}" fill="none" stroke="#6d5efc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
@@ -1417,7 +2252,7 @@ function cardHtml({ title, subtitle, chips = [], extraClass = "" }) {
     <article class="list-item ${extraClass}">
       <div class="list-head">
         <div>
-          <h4 class="list-title">${escapeHtml(title)}</h4>
+          <h3 class="list-title">${escapeHtml(title)}</h3>
           <p class="list-subtitle">${escapeHtml(subtitle)}</p>
         </div>
       </div>
@@ -1434,17 +2269,19 @@ function toast(message) {
   const el = document.createElement("div");
   el.className = "toast";
   el.textContent = message;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2400);
+  els.toastRegion.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
 }
 
 function downloadBlob(blob, filename) {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
 function toCsv(rows, keys) {
@@ -1459,11 +2296,15 @@ function csvCell(value) {
 }
 
 function uid() {
-  return Math.random().toString(36).slice(2, 10);
+  return typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `id-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 }
 
 function formatNumber(value) {
-  return Number(value).toFixed(Number(value) % 1 === 0 ? 0 : 1);
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "0";
+  return number.toFixed(number % 1 === 0 ? 0 : 1);
 }
 
 function formatDate(date) {
@@ -1475,14 +2316,31 @@ function formatShortDateTime(dateTime) {
   return new Date(dateTime).toLocaleString("es-ES", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatDuration(totalSeconds) {
+  const minutes = Math.floor(Number(totalSeconds || 0) / 60);
+  const seconds = Number(totalSeconds || 0) % 60;
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+
+  if (hours > 0) return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  return `${String(mins).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
 function shortLabel(date) {
   return new Date(`${date}T12:00:00`).toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit" });
+}
+
+function todayLocal() {
+  const now = new Date();
+  const local = new Date(now.getTime() - now.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function offsetDate(date, amount) {
   const base = new Date(`${date}T12:00:00`);
   base.setDate(base.getDate() + amount);
-  return base.toISOString().slice(0, 10);
+  const local = new Date(base.getTime() - base.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
 }
 
 function daysBetween(dateA, dateB) {
@@ -1498,4 +2356,111 @@ function escapeHtml(value) {
     .replaceAll(">", "&gt;")
     .replaceAll('"', "&quot;")
     .replaceAll("'", "&#39;");
+}
+
+function datePartFromIso(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+function isoFromLocalDateTime(date, time = "12:00") {
+  return new Date(`${date}T${time}:00`).toISOString();
+}
+
+function computeGoalProgress({ baseline, current, target }) {
+  if (current == null) return 0;
+  if (baseline == null || baseline === target) {
+    const simple = (current / Math.max(target, 1)) * 100;
+    return clamp(simple, 0, 100);
+  }
+
+  const totalDistance = target - baseline;
+  const currentDistance = current - baseline;
+  if (totalDistance === 0) return 100;
+  return clamp((currentDistance / totalDistance) * 100, 0, 100);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(Number(value || 0), min), max);
+}
+
+function roundToStep(value, step = 0.5) {
+  return Math.round(Number(value || 0) / step) * step;
+}
+
+function resolveGroupEntries(groupId) {
+  if (groupId.startsWith("manual|")) {
+    return [groupId.split("|")[1]];
+  }
+
+  if (groupId.startsWith("session|")) {
+    const [, sessionId, exercise] = groupId.split("|");
+    return state.workouts
+      .filter((item) => item.sessionId === sessionId && item.exercise === exercise)
+      .map((item) => item.id);
+  }
+
+  return [];
+}
+
+function isStandaloneMode() {
+  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+}
+
+function persistState({ render = true, save = true } = {}) {
+  if (save) queueSave();
+  if (render) renderAll();
+}
+
+function queueSave() {
+  clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    saveInFlight = saveInFlight.then(() => idbSet(DB_KEY, state)).catch((error) => {
+      console.error("No se pudo guardar el estado", error);
+    });
+  }, 120);
+}
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onerror = () => reject(request.error);
+
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DB_STORE)) {
+        database.createObjectStore(DB_STORE);
+      }
+    };
+
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function idbGet(key) {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve(null);
+    const transaction = db.transaction(DB_STORE, "readonly");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.get(key);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result || null);
+  });
+}
+
+function idbSet(key, value) {
+  return new Promise((resolve, reject) => {
+    if (!db) return resolve();
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.put(structuredClone(value), key);
+
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
 }

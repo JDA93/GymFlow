@@ -1,15 +1,22 @@
-# GymFlow Pro v3
+# GymFlow Pro v4
 
-Versión auditada y corregida de la PWA de seguimiento de gimnasio.
+Versión mejorada de la app de seguimiento de gimnasio.
 
-## Qué mejora esta versión
-- Pantalla **Hoy** más accionable
-- **Sesión activa** más clara y rápida
-- Registro rápido con bloque de **datos opcionales**
-- Mejor lectura de **PRs, volumen, e1RM y tendencias**
-- Mejor estado de instalación **PWA**
-- Service worker y manifest más robustos
-- Estructura final preparada para desplegar en GitHub Pages, Netlify o Vercel
+## Qué cambia respecto a v3
+- Persistencia en **IndexedDB** en lugar de depender solo de `localStorage`
+- Corrección del cálculo de fecha local
+- IDs con `crypto.randomUUID()` cuando está disponible
+- Conserva `createdAt` y añade `updatedAt`
+- Flujo de **sesión serie por serie**
+- Dashboard más inteligente para sugerir qué rutina hacer hoy
+- Selector de métrica para el gráfico de ejercicio: **carga, e1RM, volumen y reps**
+- Estado PWA más realista
+- Service worker más robusto
+- Mejoras de accesibilidad:
+  - labels visibles
+  - navegación por tabs accesible
+  - skip link
+  - toasts con `aria-live`
 
 ## Archivos
 - `index.html`
@@ -22,18 +29,16 @@ Versión auditada y corregida de la PWA de seguimiento de gimnasio.
 
 ## Cómo probarla en local
 ```bash
-cd gymflow-pro-v3
+cd gymflow-pro-v4
 python -m http.server 4173
 ```
 
-Después abre `http://localhost:4173`.
+Luego abre:
+```bash
+http://localhost:4173
+```
 
-## Instalación PWA
-### Android / Chrome
-- Abre la URL publicada
-- Espera a que aparezca el botón `Instalar app` o usa el menú del navegador
-
-### iPhone / Safari
-- Abre la URL en Safari
-- Pulsa compartir
-- Toca `Añadir a pantalla de inicio`
+## Notas
+- La app sigue siendo **offline-first**
+- Los datos viven en el navegador del dispositivo
+- Puedes exportar JSON o CSV como copia de seguridad
