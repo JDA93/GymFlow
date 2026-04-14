@@ -4,25 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#111827" />
-    <meta name="description" content="GymFlow Pro: seguimiento de gimnasio con sesión activa, progreso, medidas y objetivos." />
+    <meta name="description" content="GymFlow Pro v2: seguimiento de gimnasio con sesión activa, progreso, medidas, objetivos, exportación CSV y mejoras PWA." />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro v1.1</title>
+    <title>GymFlow Pro v2</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
     <div id="appShell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">PWA instalable · offline · sesión activa</p>
-          <h1>GymFlow Pro v1.1</h1>
-          <p class="subtitle">Planifica, entrena, registra, analiza y compara tu progreso desde móvil u ordenador. Esta versión corrige métricas, evita duplicados y mejora el arranque de sesión.</p>
+          <p class="eyebrow">PWA instalable · offline · sesión activa · CSV</p>
+          <h1>GymFlow Pro v2</h1>
+          <p class="subtitle">Versión más pulida para usar de verdad en móvil: mejor PWA, exportación CSV, sugerencias de progreso, filtros, métricas más útiles y control de versión offline.</p>
         </div>
         <div class="topbar-actions">
+          <span id="networkBadge" class="status-badge">Online</span>
           <button id="installBtn" class="ghost" hidden>Instalar app</button>
           <button id="iosInstallBtn" class="ghost" hidden>Cómo instalar en iPhone</button>
-          <button id="exportBtn" class="ghost">Exportar</button>
+          <button id="exportBtn" class="ghost">Exportar JSON</button>
+          <button id="exportCsvBtn" class="ghost">Exportar CSV</button>
           <label class="ghost file-label">
             Importar
             <input id="importInput" type="file" accept="application/json" hidden />
@@ -32,9 +34,9 @@
 
       <section class="hero-card">
         <div>
-          <span class="pill">Modo local seguro</span>
-          <h2>Todo se guarda en tu dispositivo</h2>
-          <p>Incluye backup en JSON, edición rápida, sesión guiada y métricas de progreso. Más adelante podrás conectar Supabase para sincronizar entre dispositivos.</p>
+          <span class="pill">Datos locales + backup</span>
+          <h2>Tu tracker de gimnasio listo para móvil</h2>
+          <p>Todo se guarda en tu dispositivo, con backup JSON, exportación CSV y modo offline. La sesión activa ahora da mejor contexto con recomendación de carga, e1RM y estado de instalación PWA más claro.</p>
         </div>
         <div class="hero-actions">
           <button id="startTodayBtn">Entrenar ahora</button>
@@ -43,7 +45,15 @@
         </div>
       </section>
 
-      <section class="stats-grid">
+      <section id="updateBanner" class="update-banner" hidden>
+        <div>
+          <strong>Hay una nueva versión disponible.</strong>
+          <p>Recarga para aplicar la última versión guardada por el service worker.</p>
+        </div>
+        <button id="refreshAppBtn">Actualizar</button>
+      </section>
+
+      <section class="stats-grid five">
         <article class="stat-card accent-card">
           <p>Días entrenados este mes</p>
           <strong id="statSessionsMonth">0</strong>
@@ -63,6 +73,11 @@
           <p>Mejor levantamiento</p>
           <strong id="statBestLift">—</strong>
           <span id="statBestLiftLabel">Sin datos</span>
+        </article>
+        <article class="stat-card">
+          <p>e1RM top</p>
+          <strong id="statBestE1rm">—</strong>
+          <span id="statBestE1rmLabel">Estimado</span>
         </article>
       </section>
 
@@ -84,7 +99,7 @@
               <div class="card-head">
                 <div>
                   <h3>Progresión de ejercicio</h3>
-                  <p>Comparativa de peso y volumen en tus últimos registros.</p>
+                  <p>Peso, volumen y evolución real en tus últimos registros.</p>
                 </div>
                 <select id="dashboardExerciseSelect"></select>
               </div>
@@ -127,7 +142,7 @@
               <div class="card-head">
                 <div>
                   <h3>Últimos registros</h3>
-                  <p>Historial reciente con volumen y esfuerzo. Los guardados desde sesión se actualizan sin duplicarse.</p>
+                  <p>Ahora incluyen e1RM estimado y volumen.</p>
                 </div>
               </div>
               <div id="recentLogs" class="list compact"></div>
@@ -141,7 +156,7 @@
               <div class="card-head">
                 <div>
                   <h3>Sesión activa</h3>
-                  <p>Entrena dentro de la app con último peso, descanso y guardado seguro sin duplicados.</p>
+                  <p>Entrena dentro de la app con último peso, sugerencia de siguiente carga, descanso y guardado seguro.</p>
                 </div>
               </div>
 
@@ -250,12 +265,18 @@
               <div class="card-head">
                 <div>
                   <h3>Historial de entrenos</h3>
-                  <p>Filtra por ejercicio o rutina y corrige datos cuando haga falta.</p>
+                  <p>Filtra por ejercicio o rutina y ordénalo como te convenga.</p>
                 </div>
               </div>
-              <div class="toolbar-grid">
+              <div class="toolbar-grid logs-toolbar">
                 <input id="logSearchInput" placeholder="Buscar ejercicio" />
                 <select id="logRoutineFilter"></select>
+                <select id="logSortSelect">
+                  <option value="date_desc">Más recientes</option>
+                  <option value="date_asc">Más antiguos</option>
+                  <option value="weight_desc">Más peso</option>
+                  <option value="exercise_asc">Ejercicio A-Z</option>
+                </select>
               </div>
               <div id="workoutList" class="list"></div>
             </article>
@@ -264,7 +285,7 @@
               <div class="card-head">
                 <div>
                   <h3>PRs por ejercicio</h3>
-                  <p>Máxima carga registrada en cada movimiento.</p>
+                  <p>Máxima carga registrada y e1RM estimado.</p>
                 </div>
               </div>
               <div id="prList" class="list compact"></div>
@@ -334,7 +355,7 @@
               <div class="card-head">
                 <div>
                   <h3>Tendencias útiles</h3>
-                  <p>Días entrenados, progreso y señales rápidas de estancamiento.</p>
+                  <p>Días entrenados, progreso, cumplimiento y señales rápidas de estancamiento.</p>
                 </div>
               </div>
               <div id="trendSummary" class="list compact"></div>

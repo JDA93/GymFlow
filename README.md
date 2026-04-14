@@ -1,15 +1,16 @@
-# GymFlow Pro v1.1
+# GymFlow Pro v2
 
 Versión mejorada de la PWA de seguimiento de gimnasio, lista para subir a GitHub y desplegar.
 
 ## Qué cambia en esta versión
-- El KPI principal ya cuenta **días entrenados** y no ejercicios guardados
-- El botón **Entrenar ahora** inicia una sesión real
-- El temporizador muestra el descanso por defecto configurado
-- Guardar desde sesión **actualiza** el registro del ejercicio y evita duplicados
-- Confirmaciones antes de borrar rutinas, entrenos, medidas o reiniciar datos
-- Importación y carga demo con migración de estado más robusta
-- Tendencias semanales calculadas por **días de entreno**, no por número de logs
+- KPI extra con **e1RM top**
+- Exportación en **JSON y CSV**
+- Estado **online/offline** visible
+- Aviso cuando hay una **nueva versión** de la app
+- Filtro y **ordenación** del historial de entrenos
+- Sugerencia de progresión de carga en la **sesión activa**
+- Mejor estrategia del service worker para documentos HTML
+- Estructura correcta de iconos en carpeta `icons/`
 
 ## Archivos
 - `index.html`
@@ -17,11 +18,13 @@ Versión mejorada de la PWA de seguimiento de gimnasio, lista para subir a GitHu
 - `app.js`
 - `manifest.webmanifest`
 - `sw.js`
+- `icons/icon-192.png`
+- `icons/icon-512.png`
 
 ## Cómo probarla en local
 ### Opción A: Python
 ```bash
-cd gymflow-pro-v11
+cd gymflow-pro-v2
 python -m http.server 4173
 ```
 
@@ -42,6 +45,3 @@ Puedes subir la carpeta a GitHub Pages, Netlify o Vercel.
 - Abre la URL en Safari
 - Pulsa compartir
 - Toca `Añadir a pantalla de inicio`
-
-## Nota
-Asegúrate de subir también la carpeta `icons/` con tus iconos `icon-192.png` e `icon-512.png`.

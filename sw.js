@@ -1,4 +1,4 @@
-const CACHE_NAME = "gymflow-pro-v2026-04-14-1";
+const CACHE_NAME = "gymflow-pro-v2-2026-04-14-2";
 const APP_ASSETS = [
   "./",
   "./index.html",
@@ -25,9 +25,24 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
-
   const isSameOrigin = event.request.url.startsWith(self.location.origin);
   if (!isSameOrigin) return;
+
+  const acceptHeader = event.request.headers.get("accept") || "";
+  const isDocument = event.request.mode === "navigate" || acceptHeader.includes("text/html");
+
+  if (isDocument) {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
+        })
+        .catch(() => caches.match(event.request).then((cached) => cached || caches.match("./index.html")))
+    );
+    return;
+  }
 
   event.respondWith(
     caches.match(event.request).then((cached) => {
@@ -39,7 +54,7 @@ self.addEventListener("fetch", (event) => {
           }
           return response;
         })
-        .catch(() => cached || caches.match("./index.html"));
+        .catch(() => cached);
 
       return cached || networkFetch;
     })

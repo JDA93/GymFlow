@@ -1,5 +1,5 @@
-const STORAGE_KEY = "gymflow-pro-v3";
-const APP_SCHEMA_VERSION = 3;
+const STORAGE_KEY = "gymflow-pro-v4";
+const APP_SCHEMA_VERSION = 4;
 const today = () => new Date().toISOString().slice(0, 10);
 const uid = () => (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`);
 
@@ -333,8 +333,22 @@ function getPRs() {
   return [...map.values()].sort((a, b) => Number(b.weight) - Number(a.weight));
 }
 
+function estimateE1RM(weight, reps) {
+  const w = Number(weight);
+  const r = Number(reps);
+  if (!Number.isFinite(w) || !Number.isFinite(r) || !w || !r) return null;
+  return w * (1 + (Math.min(r, 12) / 30));
+}
+
 function getBestLift() {
   return getPRs()[0] || null;
+}
+
+function getBestE1RMEntry() {
+  return [...state.workoutLogs]
+    .map((entry) => ({ ...entry, e1rm: estimateE1RM(entry.weight, entry.reps) }))
+    .filter((entry) => entry.e1rm)
+    .sort((a, b) => b.e1rm - a.e1rm)[0] || null;
 }
 
 function getExerciseSeries(exerciseName) {
@@ -431,6 +445,11 @@ function renderStats() {
   const bestLift = getBestLift();
   qs("#statBestLift").textContent = bestLift ? `${formatNumber(bestLift.weight)} kg` : "—";
   qs("#statBestLiftLabel").textContent = bestLift ? bestLift.exercise : "Sin datos";
+  const bestE1rm = getBestE1RMEntry();
+  const e1rmNode = qs("#statBestE1rm");
+  const e1rmLabelNode = qs("#statBestE1rmLabel");
+  if (e1rmNode) e1rmNode.textContent = bestE1rm ? `${formatNumber(bestE1rm.e1rm)} kg` : "—";
+  if (e1rmLabelNode) e1rmLabelNode.textContent = bestE1rm ? bestE1rm.exercise : "Estimado";
 }
 
 function renderExerciseSelects() {
@@ -464,6 +483,7 @@ function renderDashboard() {
   qs("#recentLogs").innerHTML = recent.length
     ? recent.map((entry) => {
       const volume = Number(entry.weight) * Number(entry.sets) * Number(entry.reps);
+      const e1rm = estimateE1RM(entry.weight, entry.reps);
       return `
         <div class="list-item">
           <div class="list-head">
@@ -475,6 +495,7 @@ function renderDashboard() {
           </div>
           <div class="chip-row">
             <span class="chip">Volumen ${formatNumber(volume)}</span>
+            ${e1rm ? `<span class="chip">e1RM ${formatNumber(e1rm)} kg</span>` : ""}
             ${entry.routineId ? `<span class="chip">${escapeHtml(routineNameById(entry.routineId))}</span>` : ""}
           </div>
         </div>
@@ -483,6 +504,15 @@ function renderDashboard() {
     : `<p class="empty">Añade tu primer entrenamiento para empezar a ver actividad.</p>`;
 
   renderTodayFocus();
+}
+
+function getSuggestedNextWeight(exercise) {
+  const logs = [...state.workoutLogs].filter((entry) => entry.exercise === exercise).sort((a, b) => b.date.localeCompare(a.date));
+  const last = logs[0];
+  if (!last) return null;
+  const increment = Number(last.weight) >= 100 ? 5 : 2.5;
+  if (Number(last.rpe) && Number(last.rpe) >= 9) return { text: `Mantén ${formatNumber(last.weight)} kg y busca más reps`, badge: 'Ajuste' };
+  return { text: `Prueba ${formatNumber(Number(last.weight) + increment)} kg`, badge: 'Sugerencia' };
 }
 
 function renderTodayFocus() {
@@ -498,7 +528,11 @@ function renderTodayFocus() {
     focus.push({ title: "Siguiente paso", subtitle: `Lanza una sesión con ${state.routines[0].name}`, badge: "Listo" });
   }
 
-  if (latestWeightLog) focus.push({ title: `Último ${latestWeightLog.exercise}`, subtitle: `${formatDate(latestWeightLog.date)} · ${formatNumber(latestWeightLog.weight)} kg`, badge: "Referencia" });
+  if (latestWeightLog) {
+    focus.push({ title: `Último ${latestWeightLog.exercise}`, subtitle: `${formatDate(latestWeightLog.date)} · ${formatNumber(latestWeightLog.weight)} kg`, badge: "Referencia" });
+    const suggested = getSuggestedNextWeight(latestWeightLog.exercise);
+    if (suggested) focus.push({ title: `Siguiente carga ${latestWeightLog.exercise}`, subtitle: suggested.text, badge: suggested.badge });
+  }
   if (latestMeasurement?.bodyWeight !== "") focus.push({ title: "Peso actual", subtitle: `${formatNumber(latestMeasurement.bodyWeight)} kg · cintura ${formatNumber(latestMeasurement.waist)} cm`, badge: "Medición" });
   focus.push({ title: "Racha real", subtitle: streak ? `${streak} días activos consecutivos` : "La racha está parada, toca volver", badge: streak ? "On" : "Off" });
 
@@ -635,8 +669,17 @@ function renderWorkoutLogs() {
   const list = qs("#workoutList");
   list.innerHTML = entries.length ? "" : `<p class="empty">No hay registros que coincidan con el filtro.</p>`;
 
+  const sortMode = qs("#logSortSelect")?.value || "date_desc";
+  entries.sort((a, b) => {
+    if (sortMode === "date_asc") return a.date.localeCompare(b.date);
+    if (sortMode === "weight_desc") return Number(b.weight) - Number(a.weight);
+    if (sortMode === "exercise_asc") return a.exercise.localeCompare(b.exercise, "es");
+    return b.date.localeCompare(a.date);
+  });
+
   entries.forEach((entry) => {
     const volume = Number(entry.weight) * Number(entry.sets) * Number(entry.reps);
+    const e1rm = estimateE1RM(entry.weight, entry.reps);
     const div = document.createElement("div");
     div.className = "list-item";
     div.innerHTML = `
@@ -651,6 +694,7 @@ function renderWorkoutLogs() {
         <span class="chip">${entry.sets} series</span>
         <span class="chip">${entry.reps} reps</span>
         <span class="chip">Volumen ${formatNumber(volume)}</span>
+        ${e1rm ? `<span class="chip">e1RM ${formatNumber(e1rm)} kg</span>` : ""}
         <span class="chip">RPE ${entry.rpe || "—"}</span>
         ${entry.rest ? `<span class="chip">Descanso ${entry.rest}s</span>` : ""}
         ${entry.tempo ? `<span class="chip">Tempo ${escapeHtml(entry.tempo)}</span>` : ""}
@@ -689,7 +733,7 @@ function renderWorkoutLogs() {
         <div class="list-head">
           <div>
             <p class="list-title">${escapeHtml(entry.exercise)}</p>
-            <p class="list-subtitle">${formatDate(entry.date)} · ${entry.sets}×${entry.reps}</p>
+            <p class="list-subtitle">${formatDate(entry.date)} · ${entry.sets}×${entry.reps} · e1RM ${formatNumber(estimateE1RM(entry.weight, entry.reps) || 0)} kg</p>
           </div>
           <strong>${formatNumber(entry.weight)} kg</strong>
         </div>
@@ -837,6 +881,12 @@ function buildTrendCards() {
   const streak = getCurrentStreak();
   cards.push({ title: "Racha activa", subtitle: "Se reinicia si dejas más de 1 día", value: `${streak} días` });
 
+  const recentExercise = [...state.workoutLogs].sort((a, b) => b.date.localeCompare(a.date))[0];
+  if (recentExercise) {
+    const e1rm = estimateE1RM(recentExercise.weight, recentExercise.reps);
+    if (e1rm) cards.push({ title: "e1RM reciente", subtitle: recentExercise.exercise, value: `${formatNumber(e1rm)} kg` });
+  }
+
   const stagnation = getStagnantExercises();
   if (stagnation.length) {
     cards.push({ title: "Posible estancamiento", subtitle: stagnation[0].exercise, value: `${stagnation[0].sessions} sesiones` });
@@ -939,7 +989,7 @@ function progressLine(title, current, goal, suffix) {
 
 function renderSession() {
   renderExerciseSelects();
-  const card = qs("#activeSessionCard");
+const card = qs("#activeSessionCard");
   if (!state.session) {
     card.className = "active-session empty-box";
     card.innerHTML = `<p class="empty">Selecciona una rutina e inicia la sesión para ver tus ejercicios aquí.</p>`;
@@ -982,6 +1032,7 @@ function renderSessionExercise(entry) {
   const lastLabel = lastLog ? `${formatNumber(lastLog.weight)} kg · ${lastLog.sets}x${lastLog.reps}` : "Sin referencia previa";
   const completedClass = entry.completed ? "completed" : "";
   const saveLabel = entry.savedLogId ? "Actualizar" : "Guardar";
+  const suggestion = getSuggestedNextWeight(entry.exercise);
   return `
     <div class="session-exercise ${completedClass}">
       <div class="session-exercise-top">
@@ -991,6 +1042,7 @@ function renderSessionExercise(entry) {
         </div>
         <div class="chip-row">
           <span class="chip">Último: ${lastLabel}</span>
+          ${suggestion ? `<span class="chip ghost">${escapeHtml(suggestion.text)}</span>` : ""}
           ${entry.savedLogId ? `<span class="chip success">Guardado</span>` : ""}
           ${entry.completed ? `<span class="chip success">Completado</span>` : `<span class="chip warning">Pendiente</span>`}
         </div>
@@ -1145,6 +1197,14 @@ function updateRestButtonLabel() {
   button.textContent = `Iniciar ${Number(state.preferences.defaultRestSeconds || 90)} s`;
 }
 
+function updateNetworkBadge() {
+  const badge = qs("#networkBadge");
+  if (!badge) return;
+  const online = navigator.onLine;
+  badge.textContent = online ? "Online" : "Offline";
+  badge.classList.toggle("offline", !online);
+}
+
 function renderPreferences() {
   const form = qs("#preferencesForm");
   form.defaultRestSeconds.value = state.preferences.defaultRestSeconds;
@@ -1156,8 +1216,9 @@ function renderPreferences() {
   const status = qs("#pwaStatusBox");
   const checks = [];
   checks.push({ title: "HTTPS o localhost", subtitle: location.protocol === "https:" || location.hostname === "localhost" ? "Correcto" : "Necesario para instalar" });
-  checks.push({ title: "Manifest", subtitle: "Incluido y con iconos 192 / 512" });
-  checks.push({ title: "Service worker", subtitle: "Se registra automáticamente fuera de file://" });
+  checks.push({ title: "Manifest", subtitle: "Incluido y apuntando a icons/icon-192.png e icon-512.png" });
+  checks.push({ title: "Service worker", subtitle: location.protocol === "file:" ? "No se registra en file://" : "Se registra automáticamente" });
+  checks.push({ title: "Conexión", subtitle: navigator.onLine ? "Hay conexión" : "Estás offline, la caché debería seguir funcionando" });
   checks.push({ title: "iPhone / Safari", subtitle: "Usa compartir → Añadir a pantalla de inicio" });
 
   status.innerHTML = checks.map((item) => `
@@ -1325,6 +1386,7 @@ function bindControls() {
   qs("#dashboardMetricSelect").addEventListener("change", renderDashboard);
   qs("#logSearchInput").addEventListener("input", renderWorkoutLogs);
   qs("#logRoutineFilter").addEventListener("change", renderWorkoutLogs);
+  qs("#logSortSelect")?.addEventListener("change", renderWorkoutLogs);
 
   qs("#loadDemoBtn").addEventListener("click", () => {
     state = migrateState(structuredCloneSafe(demoData));
@@ -1346,6 +1408,7 @@ function bindControls() {
   });
 
   qs("#exportBtn").addEventListener("click", exportBackup);
+  qs("#exportCsvBtn")?.addEventListener("click", exportCsvBundle);
   qs("#importInput").addEventListener("change", importBackup);
   qs("#startSessionBtn").addEventListener("click", () => startSession(qs("#sessionRoutineSelect").value));
   qs("#endSessionBtn").addEventListener("click", () => endSession(true));
@@ -1367,14 +1430,32 @@ function bindControls() {
   qs("#closeIosDialogBtn").addEventListener("click", () => qs("#iosInstallDialog").close());
 }
 
-function exportBackup() {
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+function downloadTextFile(filename, content, type = "text/plain;charset=utf-8") {
+  const blob = new Blob([content], { type });
   const href = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = href;
-  a.download = `gymflow-pro-backup-${today()}.json`;
+  a.download = filename;
   a.click();
   URL.revokeObjectURL(href);
+}
+
+function toCsv(rows) {
+  return rows.map((row) => row.map((value) => `"${String(value ?? "").replaceAll('"', '""')}"`).join(",")).join("\n");
+}
+
+function exportCsvBundle() {
+  const workoutRows = [["date", "routine", "exercise", "weight", "sets", "reps", "rpe", "rest", "tempo", "notes"]];
+  state.workoutLogs.forEach((entry) => workoutRows.push([entry.date, routineNameById(entry.routineId), entry.exercise, entry.weight, entry.sets, entry.reps, entry.rpe, entry.rest, entry.tempo, entry.notes]));
+  const measurementRows = [["date", "bodyWeight", "bodyFat", "waist", "chest", "arm", "thigh", "hips", "neck", "sleepHours", "notes"]];
+  state.measurements.forEach((entry) => measurementRows.push([entry.date, entry.bodyWeight, entry.bodyFat, entry.waist, entry.chest, entry.arm, entry.thigh, entry.hips, entry.neck, entry.sleepHours, entry.notes]));
+  downloadTextFile(`gymflow-workouts-${today()}.csv`, toCsv(workoutRows), "text/csv;charset=utf-8");
+  setTimeout(() => downloadTextFile(`gymflow-measurements-${today()}.csv`, toCsv(measurementRows), "text/csv;charset=utf-8"), 150);
+  showToast("CSV exportado.");
+}
+
+function exportBackup() {
+downloadTextFile(`gymflow-pro-backup-${today()}.json`, JSON.stringify(state, null, 2), "application/json");
   showToast("Backup exportado.");
 }
 
@@ -1428,7 +1509,17 @@ function bindInstallPrompt() {
 async function registerServiceWorker() {
   if ("serviceWorker" in navigator && location.protocol !== "file:") {
     try {
-      await navigator.serviceWorker.register("./sw.js");
+      const registration = await navigator.serviceWorker.register("./sw.js");
+      registration.addEventListener("updatefound", () => {
+        const worker = registration.installing;
+        if (!worker) return;
+        worker.addEventListener("statechange", () => {
+          if (worker.state === "installed" && navigator.serviceWorker.controller) {
+            qs("#updateBanner")?.removeAttribute("hidden");
+          }
+        });
+      });
+      qs("#refreshAppBtn")?.addEventListener("click", () => window.location.reload());
     } catch (error) {
       console.error("No se pudo registrar el service worker", error);
     }
@@ -1492,16 +1583,24 @@ function renderAll() {
   renderPreferences();
 }
 
+function bindSystemEvents() {
+  updateNetworkBadge();
+  window.addEventListener("online", () => { updateNetworkBadge(); renderPreferences(); });
+  window.addEventListener("offline", () => { updateNetworkBadge(); renderPreferences(); });
+}
+
 function init() {
   renderRoutineBuilderRows();
   bindTabs();
   bindForms();
   bindControls();
   bindInstallPrompt();
+  bindSystemEvents();
   setTodayDefaults();
   renderAll();
   registerServiceWorker();
   updateRestTimerLabel();
+  updateNetworkBadge();
   updateRestButtonLabel();
 
   document.addEventListener("visibilitychange", () => {

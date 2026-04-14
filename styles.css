@@ -105,7 +105,37 @@ button.success { background: var(--success); }
   font-size: .85rem;
   font-weight: 700;
 }
+.update-banner {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: center;
+  margin: 1rem 0;
+  background: #fff8e8;
+  border: 1px solid #f7d68a;
+  border-radius: var(--radius);
+  padding: 1rem 1.15rem;
+}
+.update-banner p, .update-banner strong { margin: 0; }
+.update-banner p { color: #7a5d00; margin-top: .2rem; }
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: .7rem 1rem;
+  border-radius: 999px;
+  font-weight: 700;
+  background: rgba(255,255,255,.12);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,.18);
+}
+.status-badge.offline {
+  background: rgba(198, 59, 59, .18);
+  border-color: rgba(255, 120, 120, .25);
+}
 .stats-grid { grid-template-columns: repeat(4, 1fr); }
+.stats-grid.five { grid-template-columns: repeat(5, 1fr); }
 .panel-grid.two { grid-template-columns: 1fr 1fr; }
 .stat-card, .card {
   background: #fff;
@@ -118,7 +148,7 @@ button.success { background: var(--success); }
 .stat-card strong {
   display: block;
   margin: .35rem 0;
-  font-size: clamp(1.6rem, 3vw, 2.15rem);
+  font-size: clamp(1.4rem, 3vw, 2.15rem);
 }
 .accent-card {
   background: linear-gradient(135deg, #fbfbff, #f3f1ff);
@@ -174,6 +204,7 @@ textarea { min-height: 96px; resize: vertical; }
 .mini-grid { display: grid; gap: .75rem; grid-template-columns: repeat(3, 1fr); }
 .mini-grid.two-columns { grid-template-columns: repeat(2, 1fr); }
 .toolbar-grid { display: grid; gap: .75rem; grid-template-columns: 1.2fr .8fr; margin-bottom: 1rem; }
+.logs-toolbar { grid-template-columns: 1.1fr .8fr .7fr; }
 .exercise-builder-head {
   display: flex;
   justify-content: space-between;
@@ -223,6 +254,10 @@ textarea { min-height: 96px; resize: vertical; }
   background: #fffaeb;
   color: #b54708;
   border-color: #fedf89;
+}
+.chip.ghost {
+  background: #f8fafc;
+  color: var(--muted);
 }
 .actions-row {
   display: flex;
@@ -338,13 +373,17 @@ dialog::backdrop { background: rgba(15, 23, 42, .45); }
   box-shadow: 0 12px 25px rgba(16,24,40,.24);
   z-index: 50;
 }
+@media (max-width: 1180px) {
+  .stats-grid.five { grid-template-columns: repeat(3, 1fr); }
+}
 @media (max-width: 980px) {
   .stats-grid, .panel-grid.two { grid-template-columns: 1fr 1fr; }
+  .stats-grid.five { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 760px) {
   #appShell { width: min(100% - 16px, 1000px); }
-  .topbar, .hero-card, .card-head, .exercise-builder-head, .rest-timer, .session-exercise-top { flex-direction: column; align-items: stretch; }
-  .stats-grid, .panel-grid.two, .mini-grid, .exercise-row, .kpi-row, .session-series-row, .toolbar-grid { grid-template-columns: 1fr; }
+  .topbar, .hero-card, .card-head, .exercise-builder-head, .rest-timer, .session-exercise-top, .update-banner { flex-direction: column; align-items: stretch; }
+  .stats-grid, .stats-grid.five, .panel-grid.two, .mini-grid, .exercise-row, .kpi-row, .session-series-row, .toolbar-grid, .logs-toolbar { grid-template-columns: 1fr; }
   .tabbar {
     position: sticky;
     top: 0;
