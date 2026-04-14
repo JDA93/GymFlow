@@ -1,7 +1,7 @@
 {
-  "name": "GymFlow Pro v4",
+  "name": "GymFlow Pro v5",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio offline con sesión serie por serie, dashboard inteligente, analíticas útiles e instalación PWA real.",
+  "description": "Seguimiento de gimnasio offline con sesión robusta, guardado fiable, ejercicios normalizados e instalación PWA real.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -16,13 +16,25 @@
       "src": "icons/icon-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
       "src": "icons/icon-512.png",
       "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

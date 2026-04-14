@@ -1,10 +1,21 @@
-const CACHE_VERSION = "gymflow-v4-2026-04-14-1";
+const CACHE_VERSION = "gymflow-v5-2026-04-14-1";
 const APP_SHELL = [
   "./",
   "./index.html",
   "./styles.css",
   "./app.js",
   "./manifest.webmanifest",
+  "./js/utils.js",
+  "./js/catalog.js",
+  "./js/store.js",
+  "./js/analytics.js",
+  "./js/session.js",
+  "./js/ui-common.js",
+  "./js/ui-dashboard.js",
+  "./js/ui-session.js",
+  "./js/ui-records.js",
+  "./js/ui-meta.js",
+  "./js/pwa.js",
   "./icons/icon-192.png",
   "./icons/icon-512.png"
 ];
@@ -20,7 +31,6 @@ self.addEventListener("install", (event) => {
         console.warn("No se pudo precachear", asset, error);
       }
     }));
-    await self.skipWaiting();
   })());
 });
 
@@ -65,7 +75,6 @@ async function networkFirst(request) {
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(CACHE_VERSION);
   const cached = await cache.match(request);
-
   const networkPromise = fetch(request)
     .then((response) => {
       if (response && response.ok) cache.put(request, response.clone());

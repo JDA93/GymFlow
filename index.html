@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#6d5efc" />
-    <meta name="description" content="GymFlow Pro v4: seguimiento de gimnasio offline con sesión serie por serie, dashboard inteligente, analíticas más útiles e instalación PWA real." />
+    <meta name="description" content="GymFlow Pro v5: seguimiento de gimnasio offline, sesión robusta, guardado fiable y PWA instalable real." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="GymFlow" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro v4</title>
+    <title>GymFlow Pro v5</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -20,13 +20,14 @@
 
       <header class="topbar">
         <div>
-          <p class="eyebrow">PWA instalable · offline · IndexedDB · sesión serie por serie</p>
-          <h1>GymFlow Pro v4</h1>
-          <p class="subtitle">Base más sólida, flujo de entreno más rápido y señales de progreso mucho más útiles.</p>
+          <p class="eyebrow">PWA instalable · offline · IndexedDB + respaldo · sesión serie por serie</p>
+          <h1>GymFlow Pro v5</h1>
+          <p class="subtitle">Más robusta, más consistente y más rápida en el flujo real de entreno.</p>
         </div>
 
         <div class="topbar-actions">
           <span id="networkBadge" class="status-badge" aria-live="polite">Online</span>
+          <span id="saveStatusBadge" class="status-badge status-badge--save" data-state="saved" aria-live="polite">Guardado</span>
           <button id="installBtn" class="ghost" hidden>Instalar app</button>
           <button id="iosInstallBtn" class="ghost" hidden>Cómo instalar en iPhone</button>
           <button id="exportBtn" class="ghost">Exportar JSON</button>
@@ -40,9 +41,9 @@
 
       <section class="hero-card hero-card--highlight">
         <div>
-          <span class="pill">v4 prioriza fiabilidad + sesión</span>
-          <h2>Entrena y registra sin fricción</h2>
-          <p>Ahora la app guarda mejor, sugiere mejor qué hacer hoy y te deja registrar tus series una a una con contexto real del último entreno.</p>
+          <span class="pill">v5 prioriza fiabilidad + consistencia + sesión</span>
+          <h2>Entrena y registra sin miedo a perder datos</h2>
+          <p>Ahora la sesión activa no se reinicia por accidente, el histórico se mantiene sincronizado y el guardado hace flush al salir o mandar la app al background.</p>
         </div>
         <div class="hero-actions">
           <button id="startTodayBtn">Entrenar ahora</button>
@@ -55,19 +56,19 @@
       <section id="updateBanner" class="update-banner" hidden>
         <div>
           <strong>Hay una versión nueva lista para aplicar.</strong>
-          <p>Actualiza para cargar la última versión guardada por el service worker.</p>
+          <p>La actualización se activará de forma predecible cuando pulses el botón.</p>
         </div>
         <button id="refreshAppBtn">Actualizar</button>
       </section>
 
       <section class="stats-grid five" aria-label="Resumen rápido">
         <article class="stat-card accent-card">
-          <p>Sesiones este mes</p>
+          <p>Días entrenados este mes</p>
           <strong id="statSessionsMonth">0</strong>
           <span>Fechas únicas entrenadas</span>
         </article>
         <article class="stat-card">
-          <p>Racha activa</p>
+          <p>Continuidad activa</p>
           <strong id="statStreak">0</strong>
           <span>Días con continuidad real</span>
         </article>
@@ -108,7 +109,7 @@
               <div class="card-head">
                 <div>
                   <h2>Qué haría hoy</h2>
-                  <p>La app te sugiere la siguiente mejor acción según tu rutina activa, tus sesiones recientes y tus objetivos.</p>
+                  <p>Primero la acción principal, después el último entreno y la señal más útil.</p>
                 </div>
               </div>
               <div id="todayFocus" class="list compact"></div>
@@ -118,7 +119,7 @@
               <div class="card-head">
                 <div>
                   <h2>Arranque rápido</h2>
-                  <p>Abre una rutina en pocos toques o revisa la última actividad reciente.</p>
+                  <p>Abre una rutina en pocos toques o edítala rápido.</p>
                 </div>
               </div>
               <div id="quickStartList" class="list compact"></div>
@@ -130,7 +131,7 @@
               <div class="card-head card-head-stack-mobile">
                 <div>
                   <h2>Progresión de ejercicio</h2>
-                  <p>Ahora puedes alternar entre carga, e1RM, volumen y reps.</p>
+                  <p>Ahora usa ejercicios normalizados y métricas más consistentes.</p>
                 </div>
                 <div class="toolbar-inline">
                   <div>
@@ -155,7 +156,7 @@
               <div class="card-head card-head-stack-mobile">
                 <div>
                   <h2>Evolución corporal</h2>
-                  <p>Peso, perímetros y descanso con una lectura más clara.</p>
+                  <p>Con etiquetas más humanas y lectura más limpia.</p>
                 </div>
                 <div>
                   <label class="sr-only" for="dashboardMetricSelect">Elegir métrica corporal</label>
@@ -180,7 +181,7 @@
               <div class="card-head">
                 <div>
                   <h2>Actividad reciente</h2>
-                  <p>Sesiones, registros manuales y señales rápidas del último bloque.</p>
+                  <p>Sesiones cerradas y últimos bloques entrenados.</p>
                 </div>
               </div>
               <div id="recentLogs" class="list compact"></div>
@@ -190,7 +191,7 @@
               <div class="card-head">
                 <div>
                   <h2>Señales rápidas</h2>
-                  <p>Adherencia, volumen reciente y estancamiento potencial.</p>
+                  <p>Adherencia, volumen y posibles zonas a vigilar.</p>
                 </div>
               </div>
               <div id="trendSummaryTop" class="list compact"></div>
@@ -204,7 +205,7 @@
               <div class="card-head">
                 <div>
                   <h2>Sesión activa</h2>
-                  <p>Flujo serie por serie con último histórico, sugerencia de carga y descanso automático.</p>
+                  <p>Más rápida y más segura. Puedes continuar la sesión activa sin reiniciarla.</p>
                 </div>
               </div>
 
@@ -213,6 +214,8 @@
                 <select id="sessionRoutineSelect"></select>
                 <div class="session-actions-row">
                   <button id="startSessionBtn">Iniciar sesión</button>
+                  <button id="copyLastSessionBtn" class="ghost">Copiar última sesión</button>
+                  <button id="discardSessionBtn" class="ghost">Descartar</button>
                   <button id="endSessionBtn" class="ghost">Cerrar sesión</button>
                 </div>
               </div>
@@ -230,6 +233,11 @@
                   <p>Volumen</p>
                   <strong id="sessionVolumeLabel">0 kg</strong>
                 </div>
+              </div>
+
+              <div class="form-field session-note-field">
+                <label for="sessionNotes">Notas rápidas de la sesión</label>
+                <textarea id="sessionNotes" placeholder="Sensaciones, ajustes, molestias, cues..."></textarea>
               </div>
 
               <div id="activeSessionCard" class="active-session empty-box">
@@ -276,15 +284,15 @@
                 <div class="mini-grid">
                   <div class="form-field">
                     <label for="workoutWeight">Peso</label>
-                    <input id="workoutWeight" name="weight" type="number" step="0.5" min="0" placeholder="Kg" required />
+                    <input id="workoutWeight" name="weight" type="number" step="0.5" min="0" inputmode="decimal" placeholder="Kg" required />
                   </div>
                   <div class="form-field">
                     <label for="workoutSets">Series</label>
-                    <input id="workoutSets" name="sets" type="number" step="1" min="1" placeholder="Series" required />
+                    <input id="workoutSets" name="sets" type="number" step="1" min="1" inputmode="numeric" placeholder="Series" required />
                   </div>
                   <div class="form-field">
                     <label for="workoutReps">Reps</label>
-                    <input id="workoutReps" name="reps" type="number" step="1" min="1" placeholder="Reps" required />
+                    <input id="workoutReps" name="reps" type="number" step="1" min="1" inputmode="numeric" placeholder="Reps" required />
                   </div>
                 </div>
 
@@ -294,11 +302,11 @@
                     <div class="mini-grid">
                       <div class="form-field">
                         <label for="workoutRpe">RPE</label>
-                        <input id="workoutRpe" name="rpe" type="number" min="1" max="10" step="0.5" placeholder="RPE" />
+                        <input id="workoutRpe" name="rpe" type="number" min="1" max="10" step="0.5" inputmode="decimal" placeholder="RPE" />
                       </div>
                       <div class="form-field">
                         <label for="workoutRest">Descanso</label>
-                        <input id="workoutRest" name="rest" type="number" min="0" step="15" placeholder="Segundos" />
+                        <input id="workoutRest" name="rest" type="number" min="0" step="15" inputmode="numeric" placeholder="Segundos" />
                       </div>
                       <div class="form-field">
                         <label for="workoutTempo">Tempo</label>
@@ -327,7 +335,7 @@
               <div class="card-head">
                 <div>
                   <h2>Nueva rutina</h2>
-                  <p>Más clara para móvil y con estructura lista para usar en sesión.</p>
+                  <p>Con ejercicios normalizados y estructura lista para crecer.</p>
                 </div>
               </div>
 
@@ -372,7 +380,7 @@
               <div class="card-head">
                 <div>
                   <h2>Tus rutinas</h2>
-                  <p>Ahora muestran última fecha usada y siguiente sesión recomendada.</p>
+                  <p>Con última fecha usada y acciones rápidas para sesión.</p>
                 </div>
               </div>
               <div id="routineList" class="list"></div>
@@ -386,7 +394,7 @@
               <div class="card-head">
                 <div>
                   <h2>Historial de entrenos</h2>
-                  <p>Se agrupa mejor por bloque y distingue sesión frente a registro manual.</p>
+                  <p>Ahora el histórico de sesión se mantiene sincronizado al borrar bloques.</p>
                 </div>
               </div>
 
@@ -431,7 +439,7 @@
               <div class="card-head">
                 <div>
                   <h2>Registrar medidas</h2>
-                  <p>Mejor lectura de composición corporal y de recuperación.</p>
+                  <p>Más claro para composición corporal y recuperación.</p>
                 </div>
               </div>
 
@@ -444,45 +452,45 @@
                 <div class="mini-grid">
                   <div class="form-field">
                     <label for="measurementWeight">Peso</label>
-                    <input id="measurementWeight" name="bodyWeight" type="number" step="0.1" placeholder="kg" />
+                    <input id="measurementWeight" name="bodyWeight" type="number" step="0.1" inputmode="decimal" placeholder="kg" />
                   </div>
                   <div class="form-field">
                     <label for="measurementFat">Grasa corporal</label>
-                    <input id="measurementFat" name="bodyFat" type="number" step="0.1" placeholder="%" />
+                    <input id="measurementFat" name="bodyFat" type="number" step="0.1" inputmode="decimal" placeholder="%" />
                   </div>
                   <div class="form-field">
                     <label for="measurementWaist">Cintura</label>
-                    <input id="measurementWaist" name="waist" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementWaist" name="waist" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                 </div>
 
                 <div class="mini-grid">
                   <div class="form-field">
                     <label for="measurementChest">Pecho</label>
-                    <input id="measurementChest" name="chest" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementChest" name="chest" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                   <div class="form-field">
                     <label for="measurementArm">Brazo</label>
-                    <input id="measurementArm" name="arm" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementArm" name="arm" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                   <div class="form-field">
                     <label for="measurementThigh">Pierna</label>
-                    <input id="measurementThigh" name="thigh" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementThigh" name="thigh" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                 </div>
 
                 <div class="mini-grid">
                   <div class="form-field">
                     <label for="measurementHips">Cadera</label>
-                    <input id="measurementHips" name="hips" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementHips" name="hips" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                   <div class="form-field">
                     <label for="measurementNeck">Cuello</label>
-                    <input id="measurementNeck" name="neck" type="number" step="0.1" placeholder="cm" />
+                    <input id="measurementNeck" name="neck" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                   <div class="form-field">
                     <label for="measurementSleep">Sueño</label>
-                    <input id="measurementSleep" name="sleepHours" type="number" step="0.5" placeholder="horas" />
+                    <input id="measurementSleep" name="sleepHours" type="number" step="0.5" inputmode="decimal" placeholder="horas" />
                   </div>
                 </div>
 
@@ -516,7 +524,7 @@
               <div class="card-head">
                 <div>
                   <h2>Volumen por ejercicio</h2>
-                  <p>Ahora también muestra tendencia reciente y peso medio por bloque.</p>
+                  <p>Con tendencia reciente y peso medio por bloque.</p>
                 </div>
               </div>
               <div id="volumeSummary" class="list compact"></div>
@@ -526,7 +534,7 @@
               <div class="card-head">
                 <div>
                   <h2>Tendencias útiles</h2>
-                  <p>Más cercanas a decisiones reales: adherencia, volumen y estancamiento.</p>
+                  <p>Más cerca de decisiones reales: adherencia, volumen y progresión.</p>
                 </div>
               </div>
               <div id="trendSummary" class="list compact"></div>
@@ -540,7 +548,7 @@
               <div class="card-head">
                 <div>
                   <h2>Objetivos</h2>
-                  <p>Se comparan contra tu referencia inicial y muestran porcentaje de avance.</p>
+                  <p>Con fecha objetivo opcional y progreso real respecto a la referencia inicial.</p>
                 </div>
               </div>
 
@@ -550,33 +558,40 @@
                   <input id="goalAthleteName" name="athleteName" placeholder="Tu nombre" />
                 </div>
 
-                <div class="mini-grid">
+                <div class="mini-grid two-columns">
+                  <div class="form-field">
+                    <label for="goalDate">Fecha objetivo</label>
+                    <input id="goalDate" name="goalDate" type="date" />
+                  </div>
                   <div class="form-field">
                     <label for="goalWeight">Objetivo de peso</label>
-                    <input id="goalWeight" name="weightGoal" type="number" step="0.1" placeholder="kg" />
-                  </div>
-                  <div class="form-field">
-                    <label for="goalWaist">Objetivo de cintura</label>
-                    <input id="goalWaist" name="waistGoal" type="number" step="0.1" placeholder="cm" />
-                  </div>
-                  <div class="form-field">
-                    <label for="goalFat">Objetivo de grasa</label>
-                    <input id="goalFat" name="bodyFatGoal" type="number" step="0.1" placeholder="%" />
+                    <input id="goalWeight" name="weightGoal" type="number" step="0.1" inputmode="decimal" placeholder="kg" />
                   </div>
                 </div>
 
                 <div class="mini-grid">
                   <div class="form-field">
-                    <label for="goalBench">Press banca</label>
-                    <input id="goalBench" name="benchGoal" type="number" step="0.5" placeholder="kg" />
+                    <label for="goalWaist">Objetivo de cintura</label>
+                    <input id="goalWaist" name="waistGoal" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
                   </div>
                   <div class="form-field">
+                    <label for="goalFat">Objetivo de grasa</label>
+                    <input id="goalFat" name="bodyFatGoal" type="number" step="0.1" inputmode="decimal" placeholder="%" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalBench">Press banca</label>
+                    <input id="goalBench" name="benchGoal" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
+                  </div>
+                </div>
+
+                <div class="mini-grid two-columns">
+                  <div class="form-field">
                     <label for="goalSquat">Sentadilla</label>
-                    <input id="goalSquat" name="squatGoal" type="number" step="0.5" placeholder="kg" />
+                    <input id="goalSquat" name="squatGoal" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
                   </div>
                   <div class="form-field">
                     <label for="goalDeadlift">Peso muerto</label>
-                    <input id="goalDeadlift" name="deadliftGoal" type="number" step="0.5" placeholder="kg" />
+                    <input id="goalDeadlift" name="deadliftGoal" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
                   </div>
                 </div>
 
@@ -593,7 +608,7 @@
               <div class="card-head">
                 <div>
                   <h2>Estado frente a objetivos</h2>
-                  <p>Ahora con progreso visual real y dirección correcta.</p>
+                  <p>Con avance visual y lectura de distancia restante.</p>
                 </div>
               </div>
               <div id="goalSummary" class="list"></div>
@@ -607,7 +622,7 @@
               <div class="card-head">
                 <div>
                   <h2>Preferencias</h2>
-                  <p>Más enfocadas en el uso real. Se ha eliminado el selector de unidades a medias.</p>
+                  <p>Más enfocadas en el uso real del entreno y el guardado.</p>
                 </div>
               </div>
 
@@ -615,11 +630,11 @@
                 <div class="mini-grid two-columns">
                   <div class="form-field">
                     <label for="prefRest">Descanso por defecto</label>
-                    <input id="prefRest" name="defaultRestSeconds" type="number" min="15" step="15" placeholder="segundos" />
+                    <input id="prefRest" name="defaultRestSeconds" type="number" min="15" step="15" inputmode="numeric" placeholder="segundos" />
                   </div>
                   <div class="form-field">
                     <label for="prefIncrement">Incremento recomendado</label>
-                    <input id="prefIncrement" name="suggestionIncrement" type="number" min="0.5" step="0.5" placeholder="kg" />
+                    <input id="prefIncrement" name="suggestionIncrement" type="number" min="0.5" step="0.5" inputmode="decimal" placeholder="kg" />
                   </div>
                 </div>
 
@@ -645,8 +660,8 @@
             <article class="card">
               <div class="card-head">
                 <div>
-                  <h2>Estado PWA</h2>
-                  <p>Ahora refleja el estado real de instalación y del service worker.</p>
+                  <h2>Estado PWA y guardado</h2>
+                  <p>Instalación, service worker y modo de persistencia reales.</p>
                 </div>
               </div>
               <div id="pwaStatusBox" class="list"></div>
@@ -668,11 +683,11 @@
       <div class="exercise-row">
         <div class="form-field">
           <label class="sr-only">Ejercicio</label>
-          <input data-field="name" placeholder="Ejercicio" />
+          <input data-field="name" placeholder="Ejercicio" list="exerciseSuggestions" />
         </div>
         <div class="form-field">
           <label class="sr-only">Series objetivo</label>
-          <input data-field="sets" type="number" step="1" min="1" placeholder="Series" />
+          <input data-field="sets" type="number" step="1" min="1" inputmode="numeric" placeholder="Series" />
         </div>
         <div class="form-field">
           <label class="sr-only">Repeticiones objetivo</label>
@@ -680,13 +695,13 @@
         </div>
         <div class="form-field">
           <label class="sr-only">Descanso</label>
-          <input data-field="rest" type="number" step="15" min="0" placeholder="Descanso" />
+          <input data-field="rest" type="number" step="15" min="0" inputmode="numeric" placeholder="Descanso" />
         </div>
-        <button type="button" class="ghost small remove-row">Quitar</button>
+        <button type="button" class="ghost small" data-action="remove-routine-row">Quitar</button>
       </div>
     </template>
 
     <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>
