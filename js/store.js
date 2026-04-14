@@ -1,41 +1,53 @@
 import { mergeDeep, numOrBlank, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
 import { normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
 
-const DB_NAME = "gymflow-pro-v5-db";
+const DB_NAME = "gymflow-pro-v6-db";
 const DB_VERSION = 1;
 const DB_STORE = "app_state";
 const DB_KEY = "state";
-const FALLBACK_STORAGE_KEY = "gymflow-pro-v5-fallback";
+const FALLBACK_STORAGE_KEY = "gymflow-pro-v6-fallback";
 const LEGACY_STORAGE_KEYS = [
   FALLBACK_STORAGE_KEY,
+  "gymflow-pro-v5-fallback",
   "gymflow-pro-v4-data",
   "gymflow-pro-v3-data"
 ];
 
 export function defaultState() {
   return {
-    version: 5,
+    version: 6,
     workouts: [],
     measurements: [],
     routines: [],
     sessionHistory: [],
     goals: {
       athleteName: "",
-      weightGoal: "",
-      waistGoal: "",
-      bodyFatGoal: "",
-      benchGoal: "",
-      squatGoal: "",
-      deadliftGoal: "",
       focusGoal: "",
-      goalDate: ""
+      goalDate: "",
+      resultGoals: {
+        bodyWeight: "",
+        waist: "",
+        bodyFat: "",
+        bench: "",
+        squat: "",
+        deadlift: ""
+      },
+      habits: {
+        workoutsPerWeek: "",
+        sleepHours: "",
+        measureEveryDays: "",
+        minimumStreakDays: ""
+      }
     },
     preferences: {
+      units: "metric",
       defaultRestSeconds: FALLBACK_REST_SECONDS,
       suggestionIncrement: 2.5,
       autoStartRest: true,
       keepScreenAwake: false,
-      showWarmupsInLogs: true
+      showWarmupsInLogs: true,
+      enableVibration: true,
+      collapseManualLog: true
     },
     session: {
       active: false,
@@ -44,21 +56,31 @@ export function defaultState() {
       startedAt: "",
       endedAt: "",
       completedExerciseIds: [],
+      skippedExerciseIds: [],
       currentExerciseId: "",
       notes: "",
-      setEntries: []
+      setEntries: [],
+      lastDeletedSet: null,
+      restTimerEndsAt: ""
     },
     ui: {
       activeTab: "dashboard",
       editingWorkoutId: "",
       editingRoutineId: "",
       editingMeasurementId: "",
+      editingGroupId: "",
       dashboardExerciseId: "",
-      dashboardExerciseMetric: "weight",
+      dashboardExerciseMetric: "e1rm",
       dashboardMetric: "bodyWeight",
+      analyticsLiftId: "",
       logSearch: "",
       logRoutine: "all",
-      logSort: "date_desc"
+      logSort: "date_desc",
+      logSource: "all",
+      logMuscle: "all",
+      logDatePreset: "all",
+      sessionManualOpen: false,
+      settingsAdvancedOpen: false
     },
     meta: {
       saveStatus: "saved",
@@ -179,8 +201,36 @@ export async function createStore(saveStatusEl) {
 }
 
 export function migrateState(rawState) {
-  const base = mergeDeep(defaultState(), rawState || {});
-  base.version = 5;
+  const raw = rawState || {};
+  const base = mergeDeep(defaultState(), raw);
+  base.version = 6;
+
+  const legacyGoals = raw.goals || {};
+  base.goals = {
+    athleteName: String(legacyGoals.athleteName || base.goals.athleteName || "").trim(),
+    focusGoal: String(legacyGoals.focusGoal || base.goals.focusGoal || "").trim(),
+    goalDate: String(legacyGoals.goalDate || base.goals.goalDate || "").trim(),
+    resultGoals: {
+      bodyWeight: legacyGoals.resultGoals?.bodyWeight ?? legacyGoals.weightGoal ?? base.goals.resultGoals.bodyWeight ?? "",
+      waist: legacyGoals.resultGoals?.waist ?? legacyGoals.waistGoal ?? base.goals.resultGoals.waist ?? "",
+      bodyFat: legacyGoals.resultGoals?.bodyFat ?? legacyGoals.bodyFatGoal ?? base.goals.resultGoals.bodyFat ?? "",
+      bench: legacyGoals.resultGoals?.bench ?? legacyGoals.benchGoal ?? base.goals.resultGoals.bench ?? "",
+      squat: legacyGoals.resultGoals?.squat ?? legacyGoals.squatGoal ?? base.goals.resultGoals.squat ?? "",
+      deadlift: legacyGoals.resultGoals?.deadlift ?? legacyGoals.deadliftGoal ?? base.goals.resultGoals.deadlift ?? ""
+    },
+    habits: {
+      workoutsPerWeek: legacyGoals.habits?.workoutsPerWeek ?? "",
+      sleepHours: legacyGoals.habits?.sleepHours ?? "",
+      measureEveryDays: legacyGoals.habits?.measureEveryDays ?? "",
+      minimumStreakDays: legacyGoals.habits?.minimumStreakDays ?? ""
+    }
+  };
+
+  base.preferences = {
+    ...defaultState().preferences,
+    ...(raw.preferences || {})
+  };
+
   base.workouts = Array.isArray(base.workouts) ? base.workouts.map((item) => normalizeWorkoutRecord({
     id: item.id || uid(),
     date: item.date || todayLocal(),
@@ -195,7 +245,7 @@ export function migrateState(rawState) {
     tempo: String(item.tempo || "").trim(),
     notes: String(item.notes || "").trim(),
     isWarmup: Boolean(item.isWarmup),
-    source: item.source || "manual",
+    source: item.source || (item.sessionId ? "session" : "manual"),
     createdAt: item.createdAt || item.loggedAt || new Date().toISOString(),
     updatedAt: item.updatedAt || item.createdAt || item.loggedAt || new Date().toISOString()
   })) : [];
@@ -223,13 +273,20 @@ export function migrateState(rawState) {
     day: String(routine.day || "").trim(),
     focus: String(routine.focus || "").trim(),
     notes: String(routine.notes || "").trim(),
-    exercises: Array.isArray(routine.exercises) ? routine.exercises.map((exercise) => normalizeRoutineExercise({
-      id: exercise.id || uid(),
-      name: String(exercise.name || "").trim(),
-      sets: Number(exercise.sets || 0),
-      reps: String(exercise.reps || "").trim(),
-      rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)
-    })) : []
+    createdAt: routine.createdAt || new Date().toISOString(),
+    updatedAt: routine.updatedAt || routine.createdAt || new Date().toISOString(),
+    exercises: Array.isArray(routine.exercises)
+      ? routine.exercises.map((exercise) => normalizeRoutineExercise({
+        id: exercise.id || uid(),
+        name: String(exercise.name || "").trim(),
+        sets: Number(exercise.sets || 0),
+        reps: String(exercise.reps || "").trim(),
+        rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+        block: String(exercise.block || "").trim(),
+        notes: String(exercise.notes || "").trim(),
+        createdAt: exercise.createdAt || new Date().toISOString()
+      }))
+      : []
   })) : [];
 
   base.sessionHistory = Array.isArray(base.sessionHistory) ? base.sessionHistory.map((item) => ({
@@ -254,8 +311,11 @@ export function migrateState(rawState) {
     startedAt: base.session?.startedAt || "",
     endedAt: base.session?.endedAt || "",
     completedExerciseIds: Array.isArray(base.session?.completedExerciseIds) ? [...new Set(base.session.completedExerciseIds)] : [],
+    skippedExerciseIds: Array.isArray(base.session?.skippedExerciseIds) ? [...new Set(base.session.skippedExerciseIds)] : [],
     currentExerciseId: base.session?.currentExerciseId || "",
     notes: String(base.session?.notes || ""),
+    lastDeletedSet: base.session?.lastDeletedSet || null,
+    restTimerEndsAt: base.session?.restTimerEndsAt || "",
     setEntries: Array.isArray(base.session?.setEntries)
       ? base.session.setEntries.map((entry) => normalizeWorkoutRecord({
         id: entry.id || uid(),
@@ -296,12 +356,19 @@ export function migrateState(rawState) {
       : []
   };
 
-  base.ui.dashboardExerciseMetric = base.ui.dashboardExerciseMetric || "weight";
-  base.ui.dashboardMetric = base.ui.dashboardMetric || "bodyWeight";
-  base.ui.dashboardExerciseId = base.ui.dashboardExerciseId || "";
-  base.ui.logRoutine = base.ui.logRoutine || "all";
-  base.ui.logSort = base.ui.logSort || "date_desc";
-  base.ui.activeTab = base.ui.activeTab || "dashboard";
+  base.ui = {
+    ...defaultState().ui,
+    ...(raw.ui || {})
+  };
+
+  if (!base.ui.dashboardExerciseMetric) base.ui.dashboardExerciseMetric = "e1rm";
+  if (!base.ui.dashboardMetric) base.ui.dashboardMetric = "bodyWeight";
+  if (!base.ui.logRoutine) base.ui.logRoutine = "all";
+  if (!base.ui.logSort) base.ui.logSort = "date_desc";
+  if (!base.ui.logSource) base.ui.logSource = "all";
+  if (!base.ui.logMuscle) base.ui.logMuscle = "all";
+  if (!base.ui.logDatePreset) base.ui.logDatePreset = "all";
+  if (!base.ui.activeTab) base.ui.activeTab = "dashboard";
 
   return base;
 }

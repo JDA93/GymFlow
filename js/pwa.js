@@ -8,9 +8,7 @@ export function createPwaManager(els, onStatusChange = () => {}) {
     if ("serviceWorker" in navigator) {
       try {
         registration = await navigator.serviceWorker.register("./sw.js");
-        if (registration.waiting) {
-          els.updateBanner.hidden = false;
-        }
+        if (registration.waiting) els.updateBanner.hidden = false;
 
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;
@@ -70,9 +68,7 @@ export function createPwaManager(els, onStatusChange = () => {}) {
   }
 
   function getStatus() {
-    const manifestPresent = Boolean(document.querySelector('link[rel="manifest"]'))
-      && Boolean(document.querySelector('link[rel="icon"]'));
-
+    const manifestPresent = Boolean(document.querySelector('link[rel="manifest"]')) && Boolean(document.querySelector('link[rel="icon"]'));
     return {
       ios: /iphone|ipad|ipod/i.test(navigator.userAgent),
       standalone: isStandaloneMode(),
@@ -85,10 +81,5 @@ export function createPwaManager(els, onStatusChange = () => {}) {
     };
   }
 
-  return {
-    init,
-    promptInstall,
-    refreshApp,
-    getStatus
-  };
+  return { init, promptInstall, refreshApp, getStatus };
 }

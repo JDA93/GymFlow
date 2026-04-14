@@ -62,6 +62,7 @@ export function datePartFromIso(value) {
 }
 
 export function daysBetween(dateA, dateB) {
+  if (!dateA || !dateB) return 0;
   const a = new Date(`${dateA}T12:00:00`);
   const b = new Date(`${dateB}T12:00:00`);
   return Math.round((b - a) / 86400000);
@@ -94,6 +95,27 @@ export function shortLabel(date) {
   });
 }
 
+export function monthLabel(date) {
+  if (!date) return "";
+  return new Date(`${date}T12:00:00`).toLocaleDateString("es-ES", {
+    month: "short",
+    year: "2-digit"
+  });
+}
+
+export function startOfWeek(date) {
+  const base = new Date(`${date}T12:00:00`);
+  const day = base.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  base.setDate(base.getDate() + diff);
+  const local = new Date(base.getTime() - base.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 10);
+}
+
+export function weekLabel(date) {
+  return shortLabel(startOfWeek(date));
+}
+
 export function formatDuration(totalSeconds) {
   const safe = Math.max(0, Number(totalSeconds || 0));
   const minutes = Math.floor(safe / 60);
@@ -113,8 +135,25 @@ export function formatNumber(value, digits = 1) {
   return number.toFixed(decimals);
 }
 
+export function formatDelta(value, suffix = "") {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === 0) return `0${suffix}`;
+  return `${number > 0 ? "+" : ""}${formatNumber(number)}${suffix}`;
+}
+
+export function formatCompactDelta(value, suffix = "") {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "—";
+  return `${number > 0 ? "+" : ""}${formatNumber(number)}${suffix}`;
+}
+
 export function numOrBlank(value) {
   return value === "" || value == null ? "" : Number(value);
+}
+
+export function safeNumber(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 export function clamp(value, min, max) {
@@ -141,7 +180,7 @@ export function calcVolumeFromEntries(entries = []) {
 }
 
 export function buildRepsLabel(repsList) {
-  const unique = [...new Set(repsList.map((item) => Number(item || 0)).filter(Boolean))];
+  const unique = [...new Set(repsList.map((item) => Number(item || 0)).filter((item) => Number.isFinite(item) && item >= 0))];
   if (!unique.length) return "Reps —";
   if (unique.length === 1) return `${unique[0]} reps`;
   return `${Math.min(...unique)}-${Math.max(...unique)} reps`;
@@ -231,9 +270,38 @@ export function byCreatedAtAsc(a, b) {
 }
 
 export function isStandaloneMode() {
-  return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;
+  return window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone;
 }
 
 export function uniq(array) {
   return [...new Set(array)];
+}
+
+export function sum(values = []) {
+  return values.reduce((acc, value) => acc + Number(value || 0), 0);
+}
+
+export function average(values = []) {
+  if (!values.length) return 0;
+  return sum(values) / values.length;
+}
+
+export function percentage(part, total) {
+  if (!total) return 0;
+  return (Number(part || 0) / Number(total || 1)) * 100;
+}
+
+export function relativeDaysLabel(days) {
+  if (days == null) return "—";
+  if (days === 0) return "Hoy";
+  if (days === 1) return "Ayer";
+  return `Hace ${days} días`;
+}
+
+export function moveItem(array, fromIndex, toIndex) {
+  const clone = [...array];
+  if (fromIndex < 0 || toIndex < 0 || fromIndex >= clone.length || toIndex >= clone.length) return clone;
+  const [item] = clone.splice(fromIndex, 1);
+  clone.splice(toIndex, 0, item);
+  return clone;
 }

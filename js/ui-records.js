@@ -1,6 +1,6 @@
-import { buildWorkoutGroups, computeLastDateByRoutine, getWorkoutGroupSorter } from "./analytics.js";
+import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics.js";
 import { cardHtml, emptyHtml } from "./ui-common.js";
-import { formatDate, formatNumber } from "./utils.js";
+import { formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
 
 export function renderRoutines(state, els) {
   if (!state.routines.length) {
@@ -8,119 +8,146 @@ export function renderRoutines(state, els) {
     return;
   }
 
-  const lastDateByRoutine = computeLastDateByRoutine(state);
-  els.routineList.innerHTML = state.routines.map((routine) => `
-    <article class="list-item">
-      <div class="list-head">
-        <div>
-          <h3 class="list-title">${routine.name}</h3>
-          <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
+  els.routineList.innerHTML = state.routines.map((routine) => {
+    const meta = buildRoutineMetadata(state, routine);
+    const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
+    return `
+      <article class="list-item routine-card">
+        <div class="list-head">
+          <div>
+            <h3 class="list-title">${routine.name}</h3>
+            <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
+          </div>
+          <span class="chip ghost">${meta.lastDate ? `Último ${formatDate(meta.lastDate)}` : "Aún sin usar"}</span>
         </div>
-        <span class="chip ghost">${lastDateByRoutine[routine.id] ? `Último ${formatDate(lastDateByRoutine[routine.id])}` : "Aún sin usar"}</span>
-      </div>
-      <div class="chip-row">
-        ${routine.exercises.slice(0, 6).map((exercise) => `<span class="chip ghost">${exercise.name}</span>`).join("")}
-      </div>
-      <div class="actions-row">
-        <button class="ghost small" data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
-        <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
-        <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
-        <button class="ghost small" data-action="delete-routine" data-id="${routine.id}">Borrar</button>
-      </div>
-    </article>
-  `).join("");
+        <div class="chip-row">
+          <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
+          <span class="chip ghost">${meta.totalSets} series</span>
+          <span class="chip ${meta.complexityScore >= 24 ? "warning" : meta.complexityScore >= 16 ? "success" : "ghost"}">${meta.complexityLabel}</span>
+          ${meta.blockCount ? `<span class="chip ghost">${meta.blockCount} bloques</span>` : ""}
+          ${blockPreview.map((block) => `<span class="chip ghost">${block}</span>`).join("")}
+        </div>
+        <div class="routine-preview-list">
+          ${(routine.exercises || []).slice(0, 5).map((exercise) => `
+            <div class="routine-preview-row">
+              <strong>${exercise.block ? `${exercise.block} · ` : ""}${exercise.name}</strong>
+              <span>${exercise.sets}×${exercise.reps} · ${exercise.rest}s</span>
+            </div>
+          `).join("")}
+          ${routine.exercises.length > 5 ? `<p class="helper-line">+${routine.exercises.length - 5} ejercicios más</p>` : ""}
+        </div>
+        <div class="actions-row">
+          <button data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
+          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
+          <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
+          <button class="ghost small" data-action="delete-routine" data-id="${routine.id}">Borrar</button>
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 export function renderWorkoutList(state, els) {
-  const query = (state.ui.logSearch || "").trim().toLowerCase();
-  const groups = buildWorkoutGroups(state, { includeWarmups: state.preferences.showWarmupsInLogs })
-    .filter((group) => {
-      const matchExercise = !query || group.exercise.toLowerCase().includes(query);
-      const matchRoutine = state.ui.logRoutine === "all" || group.routineId === state.ui.logRoutine;
-      return matchExercise && matchRoutine;
-    })
-    .sort(getWorkoutGroupSorter(state.ui.logSort));
-
-  if (!groups.length) {
+  const feed = buildHistoryFeed(state);
+  if (!feed.length) {
     els.workoutList.innerHTML = emptyHtml("No hay registros con esos filtros.");
     return;
   }
 
-  els.workoutList.innerHTML = groups.map((group) => `
-    <article class="list-item">
+  els.workoutList.innerHTML = feed.map((item) => item.kind === "session" ? renderSessionHistoryCard(item) : renderManualHistoryCard(item)).join("");
+}
+
+function renderSessionHistoryCard(item) {
+  return `
+    <article class="list-item history-card history-card--session">
       <div class="list-head">
         <div>
-          <h3 class="list-title">${group.exercise}</h3>
-          <p class="list-subtitle">${formatDate(group.date)}${group.routineName ? ` · ${group.routineName}` : ""} · ${group.sourceLabel}</p>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">${formatDate(item.date)} · Sesión completa · ${item.exercisesCompleted} ejercicios</p>
         </div>
-        <span class="chip ghost">${formatNumber(group.maxWeight)} kg top</span>
+        <span class="chip success">${formatNumber(item.volume)} kg</span>
       </div>
       <div class="chip-row">
-        <span class="chip ghost">${group.setCount} series</span>
-        <span class="chip ghost">${group.repsLabel}</span>
-        <span class="chip warning">e1RM ${formatNumber(group.bestE1rm)} kg</span>
-        <span class="chip ghost">Volumen ${formatNumber(group.volume)} kg</span>
-        ${group.containsWarmup ? `<span class="chip ghost">Incluye calentamiento</span>` : ""}
+        <span class="chip ghost">${item.totalSets} series</span>
+        <span class="chip ghost">${formatDuration(item.durationSeconds || 0)}</span>
+        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
+      </div>
+      <div class="history-session-exercises">
+        ${item.exercises.slice(0, 4).map((exercise) => `
+          <div class="history-mini-row">
+            <strong>${exercise.exercise}</strong>
+            <span>${exercise.setCount} series · ${formatNumber(exercise.maxWeight)} kg top</span>
+          </div>
+        `).join("")}
       </div>
       <div class="actions-row">
-        ${group.isEditable ? `<button class="ghost small" data-action="edit-workout" data-id="${group.primaryId}">Editar</button>` : ""}
-        <button class="ghost small" data-action="delete-workout-group" data-id="${group.groupId}">Borrar bloque</button>
+        <button class="ghost small" data-action="edit-session-history" data-id="${item.sessionId}">Corregir series</button>
+        <button class="ghost small" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
       </div>
     </article>
-  `).join("");
+  `;
+}
+
+function renderManualHistoryCard(item) {
+  return `
+    <article class="list-item history-card">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">${formatDate(item.date)}${item.routineName ? ` · ${item.routineName}` : ""} · Registro manual</p>
+        </div>
+        <span class="chip ghost">${formatNumber(item.maxWeight)} kg top</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ghost">${item.setCount} series</span>
+        <span class="chip ghost">${item.repsLabel}</span>
+        <span class="chip warning">e1RM ${formatNumber(item.bestE1rm)} kg</span>
+        <span class="chip ghost">Volumen ${formatNumber(item.volume)} kg</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
+        <button class="ghost small" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
+      </div>
+    </article>
+  `;
 }
 
 export function renderPrList(state, els) {
-  const grouped = state.workouts
-    .filter((item) => !item.isWarmup)
-    .reduce((acc, item) => {
-      const key = item.exerciseId || item.exerciseKey || item.exercise;
-      acc[key] = acc[key] || [];
-      acc[key].push(item);
-      return acc;
-    }, {});
-
-  const exercises = Object.values(grouped)
-    .sort((a, b) => a[0].exercise.localeCompare(b[0].exercise, "es"));
-
-  if (!exercises.length) {
+  const items = buildPrItems(state);
+  if (!items.length) {
     els.prList.innerHTML = emptyHtml("Sin datos todavía.");
     return;
   }
 
-  els.prList.innerHTML = exercises.map((logs) => {
-    const bestWeight = logs.reduce((best, item) => Number(item.weight) > Number(best.weight) ? item : best, logs[0]);
-    const bestE1rm = logs.reduce((best, item) => (item.weight * (1 + item.reps / 30)) > (best.weight * (1 + best.reps / 30)) ? item : best, logs[0]);
-    const bestVolume = logs.reduce((best, item) => (item.weight * item.reps * item.sets) > (best.weight * best.reps * best.sets) ? item : best, logs[0]);
-    const latest = [...logs].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-
-    return cardHtml({
-      title: logs[0].exercise,
-      subtitle: `Carga ${formatNumber(bestWeight.weight)} kg · e1RM ${formatNumber(bestE1rm.weight * (1 + bestE1rm.reps / 30))} kg`,
-      chips: [
-        { label: `Top volumen ${formatNumber(bestVolume.weight * bestVolume.reps * bestVolume.sets)} kg`, type: "ghost" },
-        { label: `Último ${formatDate(latest.date)}`, type: "ghost" }
-      ]
-    });
-  }).join("");
+  els.prList.innerHTML = items.map((item) => cardHtml({
+    title: item.exercise,
+    subtitle: `Carga ${formatNumber(item.bestWeight.weight)} kg · e1RM ${formatNumber(item.bestE1rm.weight * (1 + item.bestE1rm.reps / 30))} kg`,
+    chips: [
+      { label: `Último ${formatDate(item.latest.date)}`, type: "ghost" },
+      { label: `PR reciente ${formatDate(item.bestE1rm.date)}`, type: "ghost" },
+      { label: `${item.deltaVsPrevBest >= 0 ? "+" : ""}${formatNumber(item.deltaVsPrevBest)} kg vs PR anterior`, type: item.deltaVsPrevBest >= 0 ? "success" : "warning" }
+    ]
+  })).join("");
 }
 
 export function renderMeasurements(state, els) {
-  const measurements = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  const measurements = buildMeasurementRows(state);
   els.measurementList.innerHTML = measurements.length ? measurements.map((item) => `
-    <article class="list-item">
+    <article class="list-item measurement-card">
       <div class="list-head">
         <div>
           <h3 class="list-title">${formatDate(item.date)}</h3>
-          <p class="list-subtitle">Peso ${item.bodyWeight ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Grasa ${item.bodyFat ? `${formatNumber(item.bodyFat)} %` : "—"}</p>
+          <p class="list-subtitle">Peso ${item.bodyWeight !== "" && item.bodyWeight != null ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Cintura ${item.waist !== "" && item.waist != null ? `${formatNumber(item.waist)} cm` : "—"}</p>
         </div>
+        <span class="chip ghost">Sueño ${item.sleepHours !== "" && item.sleepHours != null ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
       </div>
       <div class="chip-row">
-        <span class="chip ghost">Cintura ${item.waist ? `${formatNumber(item.waist)} cm` : "—"}</span>
-        <span class="chip ghost">Pecho ${item.chest ? `${formatNumber(item.chest)} cm` : "—"}</span>
-        <span class="chip ghost">Brazo ${item.arm ? `${formatNumber(item.arm)} cm` : "—"}</span>
-        <span class="chip ghost">Pierna ${item.thigh ? `${formatNumber(item.thigh)} cm` : "—"}</span>
-        <span class="chip ghost">Sueño ${item.sleepHours ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
+        <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : formatCompactDelta(item.deltaBodyWeight, " kg")}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : formatCompactDelta(item.deltaWaist, " cm")}</span>
+        <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : formatCompactDelta(item.deltaBodyFat, " %")}</span>
+        <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
+        <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
+        <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="edit-measurement" data-id="${item.id}">Editar</button>

@@ -1,4 +1,4 @@
-const CACHE_VERSION = "gymflow-v5-2026-04-14-1";
+const CACHE_VERSION = "gymflow-v6-2026-04-14-1";
 const APP_SHELL = [
   "./",
   "./index.html",
@@ -81,6 +81,5 @@ async function staleWhileRevalidate(request) {
       return response;
     })
     .catch(() => cached);
-
   return cached || networkPromise;
 }

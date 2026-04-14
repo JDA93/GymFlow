@@ -1,65 +1,23 @@
 import { escapeHtml, formatNumber } from "./utils.js";
 
 export function emptyHtml(message) {
-  return `<div class="chart-empty">${escapeHtml(message)}</div>`;
+  return `<div class="empty-box"><p class="empty">${escapeHtml(message)}</p></div>`;
 }
 
-export function cardHtml({ title, subtitle, chips = [], extraClass = "" }) {
+export function cardHtml({ title = "", subtitle = "", chips = [], extraClass = "", body = "", footer = "" }) {
   return `
     <article class="list-item ${extraClass}">
       <div class="list-head">
         <div>
           <h3 class="list-title">${escapeHtml(title)}</h3>
-          <p class="list-subtitle">${escapeHtml(subtitle)}</p>
+          ${subtitle ? `<p class="list-subtitle">${escapeHtml(subtitle)}</p>` : ""}
         </div>
       </div>
-      ${chips.length ? `<div class="chip-row">${chips.map((chip) => `<span class="chip ${chip.type || "ghost"}">${escapeHtml(chip.label)}</span>`).join("")}</div>` : ""}
+      ${chips?.length ? `<div class="chip-row">${chips.map((chip) => `<span class="chip ${chip.type || "ghost"}">${escapeHtml(chip.label)}</span>`).join("")}</div>` : ""}
+      ${body ? `<div class="card-body-inline">${body}</div>` : ""}
+      ${footer ? `<div class="card-footer-inline">${footer}</div>` : ""}
     </article>
   `;
-}
-
-export function buildLineChart(points, suffix = "", label = "gráfico de evolución") {
-  const width = 560;
-  const height = 240;
-  const padding = 28;
-  const values = points.map((item) => Number(item.value));
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const range = max - min || 1;
-  const stepX = (width - padding * 2) / Math.max(points.length - 1, 1);
-
-  const coords = points.map((point, index) => {
-    const x = padding + index * stepX;
-    const y = height - padding - ((point.value - min) / range) * (height - padding * 2);
-    return { ...point, x, y };
-  });
-
-  const path = coords.map((point, index) => `${index === 0 ? "M" : "L"}${point.x} ${point.y}`).join(" ");
-  const gridLines = [0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-    const y = padding + ratio * (height - padding * 2);
-    return `<line x1="${padding}" y1="${y}" x2="${width - padding}" y2="${y}" stroke="#e7ebf2" stroke-width="1" />`;
-  }).join("");
-
-  return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">
-      ${gridLines}
-      <line x1="${padding}" y1="${height - padding}" x2="${width - padding}" y2="${height - padding}" stroke="#cdd5df" stroke-width="1" />
-      <line x1="${padding}" y1="${padding}" x2="${padding}" y2="${height - padding}" stroke="#cdd5df" stroke-width="1" />
-      <path d="${path}" fill="none" stroke="#6d5efc" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"></path>
-      ${coords.map((point) => `<circle cx="${point.x}" cy="${point.y}" r="4" fill="#6d5efc"></circle>`).join("")}
-      ${coords.map((point) => `<text x="${point.x}" y="${height - 8}" text-anchor="middle" font-size="11" fill="#667085">${escapeHtml(point.label)}</text>`).join("")}
-      <text x="${padding}" y="${padding - 8}" font-size="11" fill="#667085">Máx ${formatNumber(max)}${suffix}</text>
-      <text x="${padding}" y="${height - padding + 16}" font-size="11" fill="#667085">Mín ${formatNumber(min)}${suffix}</text>
-    </svg>
-  `;
-}
-
-export function toast(els, message) {
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = message;
-  els.toastRegion.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
 }
 
 export function setActiveTab(state, tabId) {
@@ -67,13 +25,93 @@ export function setActiveTab(state, tabId) {
   document.querySelectorAll(".tab").forEach((tab) => {
     const active = tab.dataset.tab === tabId;
     tab.classList.toggle("active", active);
-    tab.setAttribute("aria-selected", String(active));
+    tab.setAttribute("aria-selected", active ? "true" : "false");
     tab.tabIndex = active ? 0 : -1;
   });
-
   document.querySelectorAll(".tab-panel").forEach((panel) => {
     const active = panel.id === tabId;
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   });
+}
+
+let toastTimer = null;
+export function toast(elsOrRegion, message, options = {}) {
+  const region = elsOrRegion.toastRegion || elsOrRegion;
+  if (!region) return;
+  clearTimeout(toastTimer);
+  const toastEl = document.createElement("div");
+  toastEl.className = `toast ${options.type ? `toast--${options.type}` : ""}`;
+  toastEl.innerHTML = `<span>${escapeHtml(message)}</span>${options.actionLabel ? `<button type="button" class="toast-action">${escapeHtml(options.actionLabel)}</button>` : ""}`;
+  region.innerHTML = "";
+  region.appendChild(toastEl);
+  const actionButton = toastEl.querySelector(".toast-action");
+  if (actionButton && typeof options.onAction === "function") {
+    actionButton.addEventListener("click", () => {
+      options.onAction();
+      region.innerHTML = "";
+    }, { once: true });
+  }
+  toastTimer = window.setTimeout(() => {
+    if (region.contains(toastEl)) region.innerHTML = "";
+  }, options.duration ?? 4200);
+}
+
+export function buildLineChart(points, suffix = "", label = "") {
+  if (!points?.length) return emptyHtml("Sin datos para dibujar esta curva.");
+  const width = 640;
+  const height = 220;
+  const padding = 24;
+  const values = points.map((point) => Number(point.value || 0));
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const getX = (index) => padding + (index * ((width - padding * 2) / Math.max(points.length - 1, 1)));
+  const getY = (value) => height - padding - (((value - min) / range) * (height - padding * 2));
+  const polyline = points.map((point, index) => `${getX(index)},${getY(point.value)}`).join(" ");
+  const dots = points.map((point, index) => `
+    <g>
+      <circle cx="${getX(index)}" cy="${getY(point.value)}" r="4"></circle>
+      <title>${escapeHtml(`${point.label}: ${formatNumber(point.value)}${suffix}`)}</title>
+    </g>
+  `).join("");
+  const yTicks = Array.from({ length: 4 }, (_, index) => {
+    const value = min + ((range / 3) * index);
+    const y = getY(value);
+    return `
+      <g>
+        <line x1="${padding}" x2="${width - padding}" y1="${y}" y2="${y}" class="chart-grid-line"></line>
+        <text x="${padding}" y="${y - 6}" class="chart-label chart-label--y">${escapeHtml(formatNumber(value))}${escapeHtml(suffix)}</text>
+      </g>
+    `;
+  }).join("");
+  const xLabels = points.map((point, index) => `<text x="${getX(index)}" y="${height - 4}" text-anchor="middle" class="chart-label">${escapeHtml(point.label)}</text>`).join("");
+  return `
+    <div class="chart-wrapper">
+      <p class="chart-caption">${escapeHtml(label)}</p>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">
+        ${yTicks}
+        <polyline points="${polyline}" fill="none" class="chart-line"></polyline>
+        ${dots}
+        ${xLabels}
+      </svg>
+    </div>
+  `;
+}
+
+export function buildBarChart(points, suffix = "", label = "") {
+  if (!points?.length) return emptyHtml("Sin datos para dibujar esta barra.");
+  const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
+  return `
+    <div class="bars-chart" aria-label="${escapeHtml(label)}">
+      <p class="chart-caption">${escapeHtml(label)}</p>
+      ${points.map((point) => `
+        <div class="bars-row">
+          <span class="bars-label">${escapeHtml(point.label)}</span>
+          <div class="bars-track"><span style="width:${(Number(point.value || 0) / max) * 100}%"></span></div>
+          <strong>${escapeHtml(formatNumber(point.value))}${escapeHtml(suffix)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }

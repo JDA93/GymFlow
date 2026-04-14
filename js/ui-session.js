@@ -1,7 +1,7 @@
 import { getExerciseReference, getActiveRoutine, nextLoadSuggestionForExercise } from "./analytics.js";
-import { buildLineChart, emptyHtml } from "./ui-common.js";
+import { emptyHtml } from "./ui-common.js";
 import { escapeHtml, extractMainRep, formatDuration, formatNumber, parseRepRange } from "./utils.js";
-import { getSessionDurationSeconds, getSessionEntriesByExercise } from "./session.js";
+import { getExerciseCompletionStatus, getSessionDurationSeconds, getSessionEntriesByExercise, getNextSuggestedExerciseId, isExerciseSkipped } from "./session.js";
 
 export function renderSession(state, els) {
   const routine = getActiveRoutine(state);
@@ -15,58 +15,76 @@ export function renderSession(state, els) {
   els.sessionNotes.value = state.session.notes || "";
   els.copyLastSessionBtn.disabled = !active;
   els.discardSessionBtn.disabled = !active;
+  els.endSessionBtn.disabled = !active;
+  els.startSessionBtn.textContent = active ? "Cambiar rutina" : "Iniciar sesión";
+  els.sessionRoutineSelect.value = state.session.routineId || els.sessionRoutineSelect.value || "";
 
   if (!active) {
-    els.activeSessionCard.innerHTML = `<p class="empty">Selecciona una rutina e inicia la sesión para ver tus ejercicios aquí.</p>`;
+    els.activeSessionCard.innerHTML = emptyHtml("Selecciona una rutina e inicia la sesión para ver tu flujo de trabajo aquí.");
     return;
   }
 
-  const completed = state.session.completedExerciseIds.length;
-  const progress = routine.exercises.length ? Math.round((completed / routine.exercises.length) * 100) : 0;
+  const effectiveCompleted = (routine.exercises || []).filter((exercise) => getExerciseCompletionStatus(state, exercise).completed).length;
+  const skippedCount = (routine.exercises || []).filter((exercise) => isExerciseSkipped(state, exercise.id)).length;
+  const progressBase = routine.exercises.length || 1;
+  const progress = Math.round(((effectiveCompleted + skippedCount) / progressBase) * 100);
+  const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
   const header = `
-    <div class="list-item highlight">
+    <div class="list-item highlight session-header-card">
       <div class="list-head">
         <div>
           <h3 class="list-title">${escapeHtml(routine.name)}</h3>
           <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")} · ${routine.exercises.length} ejercicios planificados</p>
         </div>
-        <span class="chip success">${completed}/${routine.exercises.length} completados</span>
+        <span class="chip success">${effectiveCompleted}/${routine.exercises.length} completos</span>
       </div>
       <div class="session-progress">
         <div class="progress-bar"><span style="width:${progress}%"></span></div>
         <strong>${progress}%</strong>
       </div>
+      <div class="chip-row">
+        <span class="chip ghost">Siguiente: ${escapeHtml(routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—")}</span>
+        <span class="chip ghost">Omitidos ${skippedCount}</span>
+        <span class="chip ghost">Series ${state.session.setEntries.length}</span>
+      </div>
     </div>
   `;
 
-  const cards = routine.exercises.map((exercise, index) => renderExerciseCard(state, exercise, index)).join("");
+  const cards = routine.exercises.map((exercise, index) => renderExerciseCard(state, exercise, index, nextExerciseId)).join("");
   els.activeSessionCard.innerHTML = header + cards;
 }
 
-function renderExerciseCard(state, exercise, index) {
+function renderExerciseCard(state, exercise, index, nextExerciseId) {
   const reference = getExerciseReference(state, exercise.catalogId || exercise.exerciseKey || exercise.name, state.session.routineId)
     || getExerciseReference(state, exercise.catalogId || exercise.exerciseKey || exercise.name);
   const entries = getSessionEntriesByExercise(state, exercise.id);
-  const workingEntries = entries.filter((item) => !item.isWarmup);
-  const isCompleted = state.session.completedExerciseIds.includes(exercise.id) || workingEntries.length >= Number(exercise.sets || 0);
+  const status = getExerciseCompletionStatus(state, exercise);
   const suggestion = nextLoadSuggestionForExercise(state, exercise);
   const repRange = parseRepRange(exercise.reps);
   const restDefault = exercise.rest || state.preferences.defaultRestSeconds;
+  const latestEntry = entries[entries.length - 1] || null;
+  const suggestedWeight = latestEntry ? latestEntry.weight : (reference?.weight ?? suggestion.value ?? 0);
+  const suggestedReps = latestEntry ? latestEntry.reps : extractMainRep(exercise.reps);
+  const suggestedRest = latestEntry?.rest ?? restDefault;
   const plannedSets = Array.from({ length: Number(exercise.sets || 0) }, (_, setIndex) => {
-    const done = workingEntries.length > setIndex;
+    const done = status.workingEntries.length > setIndex;
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
   }).join("");
+  const stateClass = status.skipped ? "skipped" : status.completed ? "completed" : status.inProgress ? "in-progress" : "";
 
   return `
-    <article class="session-exercise ${isCompleted ? "completed" : ""}" id="exercise-card-${exercise.id}">
+    <article class="session-exercise ${stateClass}" id="exercise-card-${exercise.id}">
       <div class="session-exercise-top">
         <div>
-          <h3 class="list-title">${index + 1}. ${escapeHtml(exercise.name)}</h3>
+          <div class="exercise-title-row">
+            <h3 class="list-title">${index + 1}. ${escapeHtml(exercise.name)}</h3>
+            ${exercise.block ? `<span class="chip ghost">${escapeHtml(exercise.block)}</span>` : ""}
+          </div>
           <p class="list-subtitle">${exercise.sets || "—"} series objetivo · ${escapeHtml(String(exercise.reps || "—"))} reps · descanso ${restDefault}s</p>
         </div>
-        <button class="ghost small" data-action="toggle-complete-exercise" data-id="${exercise.id}">
-          ${isCompleted ? "Desmarcar" : "Completar"}
-        </button>
+        <div class="actions-row actions-row--tight">
+          <button class="ghost small" data-action="toggle-skip-exercise" data-id="${exercise.id}">${status.skipped ? "Reactivar" : "Omitir"}</button>
+        </div>
       </div>
 
       <div class="planned-sets" aria-label="Series objetivo">
@@ -75,24 +93,40 @@ function renderExerciseCard(state, exercise, index) {
 
       <div class="chip-row">
         <span class="chip ghost">Último top set: ${reference ? `${formatNumber(reference.weight)} kg × ${reference.reps}` : "—"}</span>
-        <span class="chip ${suggestion.decision === "up" ? "success" : suggestion.decision === "down" ? "warning" : "ghost"}">
-          Siguiente carga: ${suggestion.value ? `${formatNumber(suggestion.value)} kg` : "Empieza cómodo"}
-        </span>
+        <span class="chip ${suggestion.decision === "up" ? "success" : suggestion.decision === "down" ? "warning" : "ghost"}">Siguiente carga: ${formatNumber(suggestion.value)} kg</span>
         <span class="chip ghost">Rango objetivo: ${repRange.max ? `${repRange.min}-${repRange.max}` : repRange.min || "—"}</span>
-        <span class="chip ghost">Series guardadas: ${workingEntries.length}</span>
+        <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : nextExerciseId === exercise.id ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado automático" : nextExerciseId === exercise.id ? "Ahora toca" : `${status.workingEntries.length} guardadas`}</span>
       </div>
-      <p class="helper-line">${escapeHtml(suggestion.reason)}</p>
+      <p class="helper-line">${escapeHtml(status.skipped ? "Ejercicio apartado temporalmente para no romper el flujo. Puedes reactivarlo cuando quieras." : suggestion.reason)}</p>
+      ${exercise.notes ? `<p class="helper-line helper-line--strong">Nota: ${escapeHtml(exercise.notes)}</p>` : ""}
 
-      <div class="session-series-row">
-        <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${exercise.id}" value="${reference?.weight ?? suggestion.value ?? ""}" />
-        <input inputmode="numeric" type="number" step="1" min="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${extractMainRep(exercise.reps)}" />
-        <input inputmode="decimal" type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${exercise.id}" value="" />
-        <input inputmode="numeric" type="number" min="0" step="15" placeholder="Descanso" id="session-rest-${exercise.id}" value="${restDefault}" />
-        <label class="switch-row compact-switch">
+      <div class="session-series-grid">
+        <div class="quick-input-group">
+          <label for="session-weight-${exercise.id}">Kg</label>
+          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${exercise.id}" value="${suggestedWeight}" />
+        </div>
+        <div class="quick-input-group">
+          <label for="session-reps-${exercise.id}">Reps</label>
+          <input inputmode="numeric" type="number" step="1" min="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${suggestedReps}" />
+        </div>
+        <div class="quick-input-group quick-input-group--small">
+          <label for="session-rpe-${exercise.id}">RPE</label>
+          <input inputmode="decimal" type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${exercise.id}" value="" />
+        </div>
+        <div class="quick-input-group quick-input-group--small">
+          <label for="session-rest-${exercise.id}">Descanso</label>
+          <input inputmode="numeric" type="number" min="0" step="15" placeholder="Segundos" id="session-rest-${exercise.id}" value="${suggestedRest}" />
+        </div>
+        <label class="switch-row compact-switch quick-switch">
           <input type="checkbox" id="session-warmup-${exercise.id}" />
-          <span>Calentamiento</span>
+          <span>Warm-up</span>
         </label>
-        <button data-action="add-session-set" data-id="${exercise.id}">Guardar serie</button>
+        <button data-action="add-session-set" data-id="${exercise.id}" ${status.skipped ? "disabled" : ""}>Guardar serie</button>
+      </div>
+
+      <div class="session-quick-actions">
+        <button class="ghost small" data-action="fill-last-session-values" data-id="${exercise.id}" ${reference ? "" : "disabled"}>Usar última referencia</button>
+        <button class="ghost small" data-action="repeat-last-session-set" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Repetir última serie</button>
       </div>
 
       ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}

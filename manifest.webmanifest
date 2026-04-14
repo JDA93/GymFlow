@@ -1,7 +1,7 @@
 {
-  "name": "GymFlow Pro v5",
+  "name": "GymFlow Pro v6",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio offline con sesión robusta, guardado fiable, ejercicios normalizados e instalación PWA real.",
+  "description": "Seguimiento de gimnasio offline con sesión activa mejorada, analítica útil y PWA instalable.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
@@ -12,29 +12,9 @@
   "orientation": "portrait-primary",
   "categories": ["health", "sports", "productivity"],
   "icons": [
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "maskable"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "maskable"
-    }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }
