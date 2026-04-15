@@ -571,3 +571,22 @@ dialog::backdrop { background: rgba(15, 23, 42, .45); }
 @media (prefers-reduced-motion: reduce) {
   * { scroll-behavior: auto !important; transition: none !important; }
 }
+
+
+.more-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; }
+.more-link { min-height:56px; font-weight:700; justify-content:flex-start; }
+.subtab-context { display:flex; align-items:center; gap:.65rem; margin-bottom:.9rem; }
+.subtab-context span { color: var(--muted); font-weight:600; }
+
+.session-exercise { border:1px solid var(--border); border-radius:18px; background:#fcfdff; margin-top:.75rem; }
+.session-exercise summary { list-style:none; cursor:pointer; }
+.session-exercise summary::-webkit-details-marker { display:none; }
+.session-exercise-summary { display:flex; align-items:center; justify-content:space-between; padding:.8rem .95rem; }
+.session-exercise-body { padding: 0 .95rem .95rem; }
+.session-exercise.completed .session-exercise-summary { background: #f2fcf7; }
+.session-exercise.skipped .session-exercise-summary { background: #fff8e8; }
+
+@media (max-width: 860px) {
+  .stats-grid.four { grid-template-columns: repeat(2, 1fr); }
+  .more-grid { grid-template-columns:1fr; }
+}

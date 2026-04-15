@@ -1,7 +1,7 @@
 {
-  "name": "GymFlow Pro v6",
+  "name": "GymFlow Pro",
   "short_name": "GymFlow",
-  "description": "Seguimiento de gimnasio offline con sesión activa mejorada, analítica útil y PWA instalable.",
+  "description": "Seguimiento de gimnasio offline-first con sesión activa, historial coherente y analítica útil.",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

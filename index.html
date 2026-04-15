@@ -4,14 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#6d5efc" />
-    <meta name="description" content="GymFlow Pro v7: seguimiento de gimnasio offline-first con sesión activa robusta, histórico coherente y analítica fiable." />
+    <meta name="description" content="GymFlow Pro: seguimiento de gimnasio offline-first con sesión activa robusta, histórico coherente y analítica fiable." />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="GymFlow" />
+    <meta name="apple-mobile-web-app-title" content="GymFlow Pro" />
     <link rel="manifest" href="manifest.webmanifest" />
     <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
-    <title>GymFlow Pro v7</title>
+    <title>GymFlow Pro</title>
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -21,7 +21,7 @@
       <header class="topbar">
         <div>
           <p class="eyebrow">PWA instalable · offline-first · IndexedDB + respaldo · sesión real</p>
-          <h1>GymFlow Pro v7</h1>
+          <h1>GymFlow Pro</h1>
           <p class="subtitle">Más pulida, más segura y mucho más rápida para entrenar de verdad.</p>
         </div>
 
@@ -76,12 +76,8 @@
         <div class="tabbar-inner" role="tablist" aria-label="Navegación principal">
           <button class="tab active" id="tab-dashboard" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="dashboard" tabindex="0">Hoy</button>
           <button class="tab" id="tab-session" data-tab="session" role="tab" aria-selected="false" aria-controls="session" tabindex="-1">Sesión</button>
-          <button class="tab" id="tab-routines" data-tab="routines" role="tab" aria-selected="false" aria-controls="routines" tabindex="-1">Rutinas</button>
-          <button class="tab" id="tab-logs" data-tab="logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1">Entrenos</button>
-          <button class="tab" id="tab-measurements" data-tab="measurements" role="tab" aria-selected="false" aria-controls="measurements" tabindex="-1">Medidas</button>
-          <button class="tab" id="tab-analytics" data-tab="analytics" role="tab" aria-selected="false" aria-controls="analytics" tabindex="-1">Evolución</button>
-          <button class="tab" id="tab-goals" data-tab="goals" role="tab" aria-selected="false" aria-controls="goals" tabindex="-1">Objetivos</button>
-          <button class="tab" id="tab-settings" data-tab="settings" role="tab" aria-selected="false" aria-controls="settings" tabindex="-1">Ajustes</button>
+          <button class="tab" id="tab-logs" data-tab="logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1">Historial</button>
+          <button class="tab" id="tab-more" data-tab="more" role="tab" aria-selected="false" aria-controls="more" tabindex="-1">Más</button>
         </div>
       </nav>
 
@@ -307,7 +303,26 @@
           </div>
         </section>
 
-        <section id="routines" class="tab-panel" role="tabpanel" aria-labelledby="tab-routines" hidden>
+
+        <section id="more" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <h2>Más herramientas</h2>
+                <p>Aquí agrupas lo estratégico: planificar, medir, evolucionar y configurar.</p>
+              </div>
+            </div>
+            <div class="more-grid">
+              <button class="ghost more-link" data-action="open-tab" data-id="routines">Rutinas</button>
+              <button class="ghost more-link" data-action="open-tab" data-id="measurements">Medidas</button>
+              <button class="ghost more-link" data-action="open-tab" data-id="analytics">Evolución</button>
+              <button class="ghost more-link" data-action="open-tab" data-id="goals">Objetivos</button>
+              <button class="ghost more-link" data-action="open-tab" data-id="settings">Ajustes</button>
+            </div>
+          </article>
+        </section>
+        <section id="routines" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Rutinas</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -427,7 +442,8 @@
           </div>
         </section>
 
-        <section id="measurements" class="tab-panel" role="tabpanel" aria-labelledby="tab-measurements" hidden>
+        <section id="measurements" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Medidas</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -509,7 +525,8 @@
           </div>
         </section>
 
-        <section id="analytics" class="tab-panel" role="tabpanel" aria-labelledby="tab-analytics" hidden>
+        <section id="analytics" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Evolución</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -594,7 +611,8 @@
           </div>
         </section>
 
-        <section id="goals" class="tab-panel" role="tabpanel" aria-labelledby="tab-goals" hidden>
+        <section id="goals" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Objetivos</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -683,7 +701,8 @@
           </div>
         </section>
 
-        <section id="settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-settings" hidden>
+        <section id="settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Ajustes</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">

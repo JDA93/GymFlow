@@ -1,20 +1,16 @@
-# GymFlow Pro v6
+# GymFlow Pro
 
-V6 completa de GymFlow Pro con foco en UX real de entreno, consistencia de datos, analítica útil y estructura modular.
+Versión actual de GymFlow Pro con foco en entrenar rápido: offline-first, sesión activa robusta y navegación móvil simplificada.
 
 ## Qué incluye
-- sesión activa más rápida y segura
-- completado automático por series y acción manual convertida en **Omitir**
-- ejercicios con **0 kg** soportados en sesión y registro manual
-- registro manual relegado a bloque secundario plegable
-- borrado de series con **deshacer**
-- histórico con sesiones completas y corrección de errores
-- constructor de rutinas con bloques A1/A2, duplicado, mover y añadir debajo
-- objetivos de resultado y de hábito
-- pantalla de evolución más analítica
-- ajustes globales reorganizados
-- PWA instalable y offline-first
-- persistencia en IndexedDB con respaldo local
+- navegación principal simplificada: **Hoy · Sesión · Historial · Más**
+- sesión activa más compacta y escaneable
+- progreso de sesión que separa completados y omitidos
+- búsqueda robusta en histórico (tolerante a tildes)
+- constructor de rutinas seguro cuando existe sesión activa
+- registros manuales y sesiones completas claramente diferenciados
+- persistencia en IndexedDB + fallback local con migración desde claves antiguas
+- PWA instalable
 
 ## Estructura
 - `index.html`
@@ -27,7 +23,7 @@ V6 completa de GymFlow Pro con foco en UX real de entreno, consistencia de datos
 
 ## Cómo probarla
 ```bash
-cd gymflow-pro-v6
+cd /workspace/GymFlow
 python -m http.server 4173
 ```
 

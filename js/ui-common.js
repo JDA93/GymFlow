@@ -20,16 +20,22 @@ export function cardHtml({ title = "", subtitle = "", chips = [], extraClass = "
   `;
 }
 
+const MORE_TABS = new Set(["routines", "measurements", "analytics", "goals", "settings"]);
+
 export function setActiveTab(state, tabId) {
-  state.ui.activeTab = tabId;
+  const resolvedTab = MORE_TABS.has(tabId) ? tabId : (tabId || "dashboard");
+  state.ui.activeTab = resolvedTab;
+  const primaryTab = MORE_TABS.has(resolvedTab) ? "more" : resolvedTab;
+
   document.querySelectorAll(".tab").forEach((tab) => {
-    const active = tab.dataset.tab === tabId;
+    const active = tab.dataset.tab === primaryTab;
     tab.classList.toggle("active", active);
     tab.setAttribute("aria-selected", active ? "true" : "false");
     tab.tabIndex = active ? 0 : -1;
   });
+
   document.querySelectorAll(".tab-panel").forEach((panel) => {
-    const active = panel.id === tabId;
+    const active = panel.id === resolvedTab;
     panel.classList.toggle("active", active);
     panel.hidden = !active;
   });
