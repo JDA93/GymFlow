@@ -29,7 +29,7 @@ export function renderSession(state, els) {
   const workingSetCount = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
   const warmupSetCount = state.session.setEntries.filter((entry) => entry.isWarmup).length;
   const progressBase = routine.exercises.length || 1;
-  const progress = Math.round(((effectiveCompleted + skippedCount) / progressBase) * 100);
+  const progress = Math.round((effectiveCompleted / progressBase) * 100);
   const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
   const header = `
     <div class="list-item highlight session-header-card">
@@ -74,9 +74,18 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
   }).join("");
   const stateClass = status.skipped ? "skipped" : status.completed ? "completed" : status.inProgress ? "in-progress" : "";
+  const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (!status.completed && !status.skipped && index === 0);
+  const summary = `
+    <summary class="session-exercise-summary">
+      <strong>${index + 1}. ${escapeHtml(exercise.name)}</strong>
+      <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : shouldExpand ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado" : shouldExpand ? "Ahora toca" : "Pendiente"}</span>
+    </summary>
+  `;
 
   return `
-    <article class="session-exercise ${stateClass}" id="exercise-card-${exercise.id}">
+    <details class="session-exercise ${stateClass}" id="exercise-card-${exercise.id}" ${shouldExpand ? "open" : ""}>
+      ${summary}
+      <div class="session-exercise-body">
       <div class="session-exercise-top">
         <div>
           <div class="exercise-title-row">
@@ -133,7 +142,8 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
       </div>
 
       ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}
-    </article>
+      </div>
+    </details>
   `;
 }
 

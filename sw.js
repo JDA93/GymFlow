@@ -1,4 +1,4 @@
-const CACHE_VERSION = "gymflow-v6-2026-04-14-1";
+const CACHE_VERSION = "gymflow-pro-2026-04-15-1";
 const APP_SHELL = [
   "./",
   "./index.html",

@@ -292,6 +292,9 @@ function handleDelegatedClick(event) {
 function handleAction(action, id, trigger) {
   switch (action) {
     case "open-tab":
+      if (["routines", "measurements", "analytics", "goals", "settings"].includes(id)) {
+        store.state.ui.moreSection = id;
+      }
       setActiveTab(store.state, id);
       store.queueSave();
       break;
@@ -795,25 +798,30 @@ function saveRoutineFromForm(event) {
     return;
   }
 
+  const editingRoutineId = store.state.ui.editingRoutineId || "";
+  const editingActiveSessionRoutine = Boolean(store.state.session.active && store.state.session.routineId && store.state.session.routineId === editingRoutineId);
+  const shouldForkActiveRoutine = editingActiveSessionRoutine;
   const routine = {
-    id: store.state.ui.editingRoutineId || uid(),
+    id: shouldForkActiveRoutine ? uid() : (editingRoutineId || uid()),
     name: String(form.get("name") || "").trim(),
     day: String(form.get("day") || "").trim(),
     focus: String(form.get("focus") || "").trim(),
     notes: String(form.get("notes") || "").trim(),
-    createdAt: store.state.routines.find((item) => item.id === store.state.ui.editingRoutineId)?.createdAt || new Date().toISOString(),
+    createdAt: store.state.routines.find((item) => item.id === editingRoutineId)?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     exercises
   };
 
-  const index = store.state.routines.findIndex((item) => item.id === routine.id);
+  const index = shouldForkActiveRoutine ? -1 : store.state.routines.findIndex((item) => item.id === routine.id);
   if (index >= 0) store.state.routines[index] = routine;
   else store.state.routines.push(routine);
 
   cancelRoutineEdit();
   store.queueSave();
   refreshRoutineDependentAreas();
-  toast(els, index >= 0 ? "Rutina actualizada." : "Rutina guardada.");
+  toast(els, shouldForkActiveRoutine
+    ? "Había una sesión activa con esta rutina. Se guardó como copia para proteger tu sesión actual."
+    : (index >= 0 ? "Rutina actualizada." : "Rutina guardada."));
 }
 
 function addExerciseRow(data = {}, afterRow = null) {
@@ -895,6 +903,10 @@ function duplicateRoutine(id) {
 }
 
 function deleteRoutine(id) {
+  if (store.state.session.active && store.state.session.routineId === id && (store.state.session.setEntries.length || store.state.session.notes.trim())) {
+    toast(els, "No puedes borrar esta rutina mientras su sesión activa tenga datos. Cierra o descarta la sesión primero.");
+    return;
+  }
   if (!window.confirm("¿Borrar esta rutina?")) return;
   store.state.routines = store.state.routines.filter((item) => item.id !== id);
   if (store.state.session.routineId === id) {
@@ -1321,7 +1333,7 @@ function resetAllData() {
 
 function exportJson() {
   const blob = new Blob([JSON.stringify(store.state, null, 2)], { type: 'application/json' });
-  downloadBlob(blob, `gymflow-pro-v6-backup-${todayLocal()}.json`);
+  downloadBlob(blob, `gymflow-pro-backup-${todayLocal()}.json`);
 }
 
 function exportCsv() {

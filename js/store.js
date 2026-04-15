@@ -1,13 +1,14 @@
 import { mergeDeep, numOrBlank, optionalNumber, safeClone, safeNumber, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
 import { normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
 
-const DB_NAME = "gymflow-pro-v6-db";
+const DB_NAME = "gymflow-pro-db";
 const DB_VERSION = 1;
 const DB_STORE = "app_state";
 const DB_KEY = "state";
-const FALLBACK_STORAGE_KEY = "gymflow-pro-v6-fallback";
+const FALLBACK_STORAGE_KEY = "gymflow-pro-fallback";
 const LEGACY_STORAGE_KEYS = [
   FALLBACK_STORAGE_KEY,
+  "gymflow-pro-v6-fallback",
   "gymflow-pro-v5-fallback",
   "gymflow-pro-v4-data",
   "gymflow-pro-v3-data"
@@ -81,7 +82,8 @@ export function defaultState() {
       logMuscle: "all",
       logDatePreset: "all",
       sessionManualOpen: false,
-      settingsAdvancedOpen: false
+      settingsAdvancedOpen: false,
+      moreSection: "routines"
     },
     meta: {
       saveStatus: "saved",
@@ -383,7 +385,12 @@ export function migrateState(rawState) {
   if (!base.ui.logSource) base.ui.logSource = "all";
   if (!base.ui.logMuscle) base.ui.logMuscle = "all";
   if (!base.ui.logDatePreset) base.ui.logDatePreset = "all";
-  if (!base.ui.activeTab) base.ui.activeTab = "dashboard";
+  if (base.ui.activeTab === "tab-dashboard") base.ui.activeTab = "dashboard";
+  if (base.ui.activeTab === "tab-session") base.ui.activeTab = "session";
+  if (![ "dashboard", "session", "logs", "more", "routines", "measurements", "analytics", "goals", "settings" ].includes(base.ui.activeTab)) {
+    base.ui.activeTab = "dashboard";
+  }
+  if (!base.ui.moreSection) base.ui.moreSection = "routines";
 
   return base;
 }

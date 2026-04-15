@@ -105,11 +105,12 @@ export function getExerciseCompletionStatus(state, exercise) {
 
 export function toggleSkipExercise(state, exerciseId) {
   const set = new Set(state.session.skippedExerciseIds || []);
-  if (set.has(exerciseId)) set.delete(exerciseId);
+  const wasSkipped = set.has(exerciseId);
+  if (wasSkipped) set.delete(exerciseId);
   else set.add(exerciseId);
   state.session.skippedExerciseIds = [...set];
   recomputeCompletedExercises(state);
-  return set.has(exerciseId)
+  return !wasSkipped
     ? { ok: true, message: "Ejercicio omitido por ahora." }
     : { ok: true, message: "Ejercicio reactivado." };
 }

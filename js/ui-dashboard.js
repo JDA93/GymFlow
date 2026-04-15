@@ -58,7 +58,7 @@ function renderPrimaryAction(state, els) {
       <div class="hero-copy">
         <span class="pill">Sin rutina sugerida</span>
         <h2>Crea una rutina y arranca</h2>
-        <p>GymFlow V6 ya está lista para entrenar, pero necesita al menos una rutina o la demo.</p>
+        <p>GymFlow Pro está lista para entrenar, pero necesita al menos una rutina o la demo.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
         <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>

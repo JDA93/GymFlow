@@ -9,6 +9,7 @@ import {
   groupBy,
   linearRegressionSlope,
   monthLabel,
+  normalizeNameForMatch,
   parseRepRange,
   relativeDaysLabel,
   shortLabel,
@@ -247,7 +248,7 @@ export function buildRecentActivity(state, limit = 6) {
     }));
 
   return [...sessions, ...manualGroups]
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.sessionId || b.title || "").localeCompare(String(a.sessionId || a.title || "")))
     .slice(0, limit);
 }
 
@@ -509,8 +510,9 @@ export function syncAllSessionHistory(state) {
 }
 
 export function buildHistoryFeed(state) {
+  const normalizeSearch = (value) => normalizeNameForMatch(value);
   const filters = {
-    query: String(state.ui.logSearch || "").trim().toLowerCase(),
+    query: normalizeSearch(String(state.ui.logSearch || "")),
     routine: state.ui.logRoutine || "all",
     muscle: state.ui.logMuscle || "all",
     source: state.ui.logSource || "all",
@@ -530,7 +532,7 @@ export function buildHistoryFeed(state) {
       routineName: session.routineName,
       source: "session",
       muscleGroups: uniq(effectiveEntries.map((item) => item.muscleGroup).filter(Boolean)),
-      searchText: `${session.routineName} ${exercises.map((item) => item.exercise).join(" ")}`.toLowerCase(),
+      searchText: normalizeSearch(`${session.routineName} ${exercises.map((item) => item.exercise).join(" ")}`),
       durationSeconds: session.durationSeconds,
       totalSets: session.totalSets,
       workingSets: session.workingSets ?? session.totalSets,
@@ -538,7 +540,8 @@ export function buildHistoryFeed(state) {
       volume: session.volume,
       exercisesCompleted: session.exercisesCompleted,
       exercises,
-      sessionId: session.sessionId
+      sessionId: session.sessionId,
+      sortAnchor: session.endedAt || session.startedAt || `${session.date}T00:00:00`
     };
   });
 
@@ -553,14 +556,15 @@ export function buildHistoryFeed(state) {
       routineName: group.routineName,
       source: "manual",
       muscleGroups: group.muscleGroup ? [group.muscleGroup] : [],
-      searchText: `${group.exercise} ${group.routineName}`.toLowerCase(),
+      searchText: normalizeSearch(`${group.exercise} ${group.routineName}`),
       setCount: group.setCount,
       maxWeight: group.maxWeight,
       volume: group.volume,
       bestE1rm: group.bestE1rm,
       repsLabel: group.repsLabel,
       groupId: group.groupId,
-      entries: group.entries
+      entries: group.entries,
+      sortAnchor: group.latestCreatedAt || `${group.date}T00:00:00`
     }));
 
   const items = [...sessionItems, ...manualItems]
@@ -580,17 +584,17 @@ export function buildHistoryFeed(state) {
   const sortBy = state.ui.logSort || "date_desc";
   items.sort((a, b) => {
     if (sortBy === "date_asc") {
-      return String(a.date || "").localeCompare(String(b.date || "")) || String(a.id || "").localeCompare(String(b.id || ""));
+      return String(a.date || "").localeCompare(String(b.date || "")) || String(a.sortAnchor || "").localeCompare(String(b.sortAnchor || ""));
     }
     if (sortBy === "weight_desc") {
       const weightA = a.kind === "session" ? Math.max(0, ...(a.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(a.maxWeight || 0);
       const weightB = b.kind === "session" ? Math.max(0, ...(b.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(b.maxWeight || 0);
-      return weightB - weightA || String(b.date || "").localeCompare(String(a.date || ""));
+      return weightB - weightA || String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
     }
     if (sortBy === "exercise_asc") {
-      return String(a.title || "").localeCompare(String(b.title || ""), "es") || String(b.date || "").localeCompare(String(a.date || ""));
+      return String(a.title || "").localeCompare(String(b.title || ""), "es") || String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
     }
-    return String(b.date || "").localeCompare(String(a.date || "")) || String(b.id || "").localeCompare(String(a.id || ""));
+    return String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
   });
 
   return items;
