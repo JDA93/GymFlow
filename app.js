@@ -14,7 +14,8 @@ import {
   hasActiveSessionRisk,
   restoreLastDeletedSessionSet,
   setSessionNotes,
-  toggleSkipExercise
+  toggleSkipExercise,
+  updateSessionSet
 } from "./js/session.js";
 import { createStore, defaultState, migrateState } from "./js/store.js";
 import { setActiveTab, toast } from "./js/ui-common.js";
@@ -383,6 +384,16 @@ function handleAction(action, id, trigger) {
     case "save-last-session-set-again":
       saveLastSessionSetAgain(id);
       break;
+    case "prefill-session-set":
+      prefillFromExistingSet(id);
+      break;
+    case "edit-session-set":
+      handleEditSessionSet(id);
+      break;
+    case "focus-current-exercise":
+    case "jump-next-exercise":
+      focusExerciseCard(id);
+      break;
     case "remove-routine-row":
       trigger.closest(".exercise-row")?.remove();
       break;
@@ -607,8 +618,13 @@ async function handleEndSession() {
     return;
   }
 
-  const summary = `${store.state.session.setEntries.length} series · ${formatDuration(getSessionDurationSeconds(store.state))}`;
-  if (!window.confirm(`Se va a guardar y cerrar la sesión (${summary}). ¿Continuar?`)) return;
+  const working = store.state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+  const warmups = store.state.session.setEntries.filter((entry) => entry.isWarmup).length;
+  const completedExercises = new Set(store.state.session.setEntries.filter((entry) => !entry.isWarmup).map((entry) => entry.exerciseId)).size;
+  const durationLabel = formatDuration(getSessionDurationSeconds(store.state));
+  const sparseWarning = working < 3 || completedExercises < 2 ? "\n\n⚠️ Sesión muy corta: revisa si falta registrar series antes de cerrar." : "";
+  const summary = `Resumen previo:\n• ${working} series efectivas\n• ${warmups} warm-up\n• ${completedExercises} ejercicios trabajados\n• ${durationLabel} de duración${sparseWarning}`;
+  if (!window.confirm(`Se va a guardar y cerrar la sesión.\n\n${summary}\n\n¿Confirmar cierre?`)) return;
 
   const result = endSession(store.state);
   if (!result.ok) {
@@ -777,6 +793,64 @@ function saveLastSessionSetAgain(exerciseId) {
   renderAnalyticsArea();
   toast(els, "Serie duplicada y guardada.");
   if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
+}
+
+function prefillFromExistingSet(entryId) {
+  const entry = store.state.session.setEntries.find((item) => item.id === entryId);
+  if (!entry) return;
+  const exerciseId = entry.exerciseId;
+  const weightInput = document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`);
+  const repsInput = document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`);
+  const rpeInput = document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`);
+  const restInput = document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`);
+  const warmupInput = document.querySelector(`#session-warmup-${CSS.escape(exerciseId)}`);
+  if (weightInput) weightInput.value = entry.weight;
+  if (repsInput) repsInput.value = entry.reps;
+  if (rpeInput) rpeInput.value = entry.rpe === "" ? "" : entry.rpe;
+  if (restInput) restInput.value = entry.rest || store.state.preferences.defaultRestSeconds;
+  if (warmupInput) warmupInput.checked = Boolean(entry.isWarmup);
+  toast(els, "Serie cargada en el formulario rápido.");
+}
+
+function handleEditSessionSet(entryId) {
+  const entry = store.state.session.setEntries.find((item) => item.id === entryId);
+  if (!entry) {
+    toast(els, "No se encontró la serie para editar.");
+    return;
+  }
+  const weight = window.prompt("Nuevo peso (kg)", String(entry.weight));
+  if (weight == null) return;
+  const reps = window.prompt("Nuevas reps", String(entry.reps));
+  if (reps == null) return;
+  const rpe = window.prompt("RPE (vacío para quitar)", entry.rpe === "" ? "" : String(entry.rpe));
+  if (rpe == null) return;
+  const rest = window.prompt("Descanso en segundos", String(entry.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS));
+  if (rest == null) return;
+  const isWarmup = window.confirm("¿Marcar como warm-up? Pulsa Aceptar para sí, Cancelar para efectiva.");
+  const result = updateSessionSet(store.state, entryId, {
+    weight: Number(weight),
+    reps: Number(reps),
+    rpe: rpe === "" ? "" : Number(rpe),
+    rest: Number(rest),
+    isWarmup
+  });
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  toast(els, result.message);
+}
+
+function focusExerciseCard(exerciseId) {
+  if (!exerciseId) return;
+  const card = document.querySelector(`#exercise-card-${CSS.escape(exerciseId)}`);
+  if (!card) return;
+  if (card.tagName.toLowerCase() === "details") card.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`)?.focus();
 }
 
 function saveWorkoutFromForm(event) {

@@ -68,14 +68,14 @@ export function renderWorkoutList(state, els) {
 function renderHistoryFilterSummary(state, els, total) {
   if (!els.logFilterSummary) return;
   const active = [];
-  if (state.ui.logSearch) active.push(`búsqueda: "${state.ui.logSearch}"`);
-  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina específica");
+  if (state.ui.logSearch) active.push(`texto "${state.ui.logSearch}"`);
+  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina");
   if (state.ui.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
   if (state.ui.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
   if (state.ui.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
   els.logFilterSummary.textContent = active.length
-    ? `${total} resultados · filtros activos (${active.join(" · ")}).`
-    : `${total} resultados · sin filtros activos.`;
+    ? `${total} resultados · filtros activos: ${active.join(" · ")}.`
+    : `${total} resultados · vista completa.`;
 }
 
 function renderSessionHistoryCard(item) {
@@ -91,8 +91,10 @@ function renderSessionHistoryCard(item) {
       <div class="chip-row">
         <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
         <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
+        <span class="chip ghost">${item.exercisesCompleted ?? 0} ejercicios</span>
         ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
       </div>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
       <div class="history-session-exercises">
         ${item.exercises.slice(0, 4).map((exercise) => `
           <div class="history-mini-row">
@@ -112,7 +114,7 @@ function renderSessionHistoryCard(item) {
 
 function renderManualHistoryCard(item) {
   return `
-    <article class="list-item history-card">
+    <article class="list-item history-card history-card--manual">
       <div class="list-head">
         <div>
           <h3 class="list-title">${item.title}</h3>
@@ -126,6 +128,7 @@ function renderManualHistoryCard(item) {
         <span class="chip warning">e1RM ${formatNumber(item.bestE1rm)} kg</span>
         <span class="chip ghost">Volumen ${formatNumber(item.volume)} kg</span>
       </div>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
       <div class="actions-row">
         <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
         <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
