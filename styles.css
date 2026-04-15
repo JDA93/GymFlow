@@ -660,13 +660,23 @@ dialog::backdrop { background: rgba(15, 23, 42, .45); }
 .more-last { border: 1px solid var(--border); border-radius: 14px; padding: .85rem; background: #f8fafc; margin-bottom: .85rem; display: grid; gap: .55rem; }
 .logs-toolbar-head { display: flex; gap: .7rem; align-items: center; margin-bottom: .75rem; }
 .logs-toolbar-head .form-field { flex: 1; }
+.routine-library-toolbar { margin-bottom: .45rem; grid-template-columns: 1.4fr 1fr; }
 .logs-filters-panel { margin-bottom: 1rem; }
 .danger-zone-inline { padding-top: .25rem; border-top: 1px dashed #f2b8b5; }
 .danger-zone { border: 1px solid #f5b3ad; background: #fff5f4; padding: .85rem; border-radius: 14px; margin-top: .8rem; display: grid; gap: .6rem; }
 .session-exercise.is-next { border-color: #8b7fff; box-shadow: inset 0 0 0 1px #8b7fff; }
+.session-exercise.is-next .session-exercise-summary { background: #f2f0ff; }
 .rest-card { position: sticky; top: .5rem; }
 .rest-timer.active { border-color: #8b7fff; background: linear-gradient(180deg,#f3f0ff,#ece8ff); box-shadow: inset 0 0 0 1px rgba(109,94,252,.25); }
 .rest-timer.active strong { color: #4338ca; }
+.dialog-shell .form-grid {
+  width: min(520px, calc(100vw - 26px));
+  background: #fff;
+  border-radius: 20px;
+  padding: 1rem;
+  box-shadow: var(--shadow);
+}
+.dialog-shell h3 { margin: 0 0 .3rem; }
 .settings-actions-row .file-label { background: transparent; }
 .card { padding: 1.1rem; }
 .list-item { padding: .9rem; }

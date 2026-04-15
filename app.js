@@ -10,6 +10,7 @@ import {
   endSession,
   getSessionDurationSeconds,
   getSessionEntriesByExercise,
+  getNextSuggestedExerciseId,
   getWorkingEntriesByExercise,
   hasActiveSessionRisk,
   restoreLastDeletedSessionSet,
@@ -76,6 +77,9 @@ const els = {
   exerciseRows: document.querySelector("#exerciseRows"),
   exerciseRowTemplate: document.querySelector("#exerciseRowTemplate"),
   routineList: document.querySelector("#routineList"),
+  routineSearchInput: document.querySelector("#routineSearchInput"),
+  routineDayFilter: document.querySelector("#routineDayFilter"),
+  routineFilterSummary: document.querySelector("#routineFilterSummary"),
   cancelRoutineEditBtn: document.querySelector("#cancelRoutineEditBtn"),
   logFilterSummary: document.querySelector("#logFilterSummary"),
   workoutList: document.querySelector("#workoutList"),
@@ -113,6 +117,10 @@ const els = {
   groupEditorTitle: document.querySelector("#groupEditorTitle"),
   groupEditorContent: document.querySelector("#groupEditorContent"),
   closeGroupEditorBtn: document.querySelector("#closeGroupEditorBtn"),
+  sessionSetEditorDialog: document.querySelector("#sessionSetEditorDialog"),
+  sessionSetEditorForm: document.querySelector("#sessionSetEditorForm"),
+  sessionSetEditorTitle: document.querySelector("#sessionSetEditorTitle"),
+  cancelSessionSetEditorBtn: document.querySelector("#cancelSessionSetEditorBtn"),
   exerciseSuggestions: document.querySelector("#exerciseSuggestions"),
   toastRegion: document.querySelector("#toastRegion")
 };
@@ -215,6 +223,16 @@ function bindEvents() {
   els.workoutForm.addEventListener("submit", saveWorkoutFromForm);
   els.cancelWorkoutEditBtn.addEventListener("click", cancelWorkoutEdit);
   els.routineForm.addEventListener("submit", saveRoutineFromForm);
+  els.routineSearchInput?.addEventListener("input", (event) => {
+    store.state.ui.routineSearch = event.target.value;
+    renderRoutinesArea();
+    store.queueSave();
+  });
+  els.routineDayFilter?.addEventListener("change", (event) => {
+    store.state.ui.routineDayFilter = event.target.value;
+    renderRoutinesArea();
+    store.queueSave();
+  });
   els.addExerciseRowBtn.addEventListener("click", () => addExerciseRow());
   els.cancelRoutineEditBtn.addEventListener("click", cancelRoutineEdit);
   els.measurementForm.addEventListener("submit", saveMeasurementFromForm);
@@ -223,6 +241,8 @@ function bindEvents() {
   els.preferencesForm.addEventListener("submit", savePreferences);
   els.groupEditorForm.addEventListener("submit", saveEditedHistoryEntries);
   els.closeGroupEditorBtn.addEventListener("click", () => els.groupEditorDialog.close());
+  els.sessionSetEditorForm?.addEventListener("submit", saveSessionSetEditor);
+  els.cancelSessionSetEditorBtn?.addEventListener("click", () => els.sessionSetEditorDialog.close());
 
   els.logSearchInput.addEventListener("input", (event) => {
     store.state.ui.logSearch = event.target.value;
@@ -391,8 +411,10 @@ function handleAction(action, id, trigger) {
       handleEditSessionSet(id);
       break;
     case "focus-current-exercise":
-    case "jump-next-exercise":
       focusExerciseCard(id);
+      break;
+    case "jump-next-exercise":
+      jumpToNextExercise(id);
       break;
     case "remove-routine-row":
       trigger.closest(".exercise-row")?.remove();
@@ -468,7 +490,16 @@ function renderSessionArea() {
 }
 
 function renderRoutinesArea() {
+  populateRoutineLibraryFilters();
   renderRoutines(store.state, els);
+}
+
+function populateRoutineLibraryFilters() {
+  if (!els.routineSearchInput || !els.routineDayFilter) return;
+  const days = [...new Set(store.state.routines.map((item) => String(item.day || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  els.routineDayFilter.innerHTML = `<option value="all">Todos los días / bloques</option>${days.map((day) => `<option value="${day}">${day}</option>`).join("")}`;
+  els.routineSearchInput.value = store.state.ui.routineSearch || "";
+  els.routineDayFilter.value = store.state.ui.routineDayFilter || "all";
 }
 
 function renderLogsArea() {
@@ -818,29 +849,38 @@ function handleEditSessionSet(entryId) {
     toast(els, "No se encontró la serie para editar.");
     return;
   }
-  const weight = window.prompt("Nuevo peso (kg)", String(entry.weight));
-  if (weight == null) return;
-  const reps = window.prompt("Nuevas reps", String(entry.reps));
-  if (reps == null) return;
-  const rpe = window.prompt("RPE (vacío para quitar)", entry.rpe === "" ? "" : String(entry.rpe));
-  if (rpe == null) return;
-  const rest = window.prompt("Descanso en segundos", String(entry.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS));
-  if (rest == null) return;
-  const isWarmup = window.confirm("¿Marcar como warm-up? Pulsa Aceptar para sí, Cancelar para efectiva.");
+  if (!els.sessionSetEditorDialog || !els.sessionSetEditorForm) return;
+  els.sessionSetEditorTitle.textContent = `Editar serie · ${entry.exerciseName || "Ejercicio"}`;
+  els.sessionSetEditorForm.entryId.value = entry.id;
+  els.sessionSetEditorForm.weight.value = entry.weight;
+  els.sessionSetEditorForm.reps.value = entry.reps;
+  els.sessionSetEditorForm.rpe.value = entry.rpe === "" ? "" : entry.rpe;
+  els.sessionSetEditorForm.rest.value = entry.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+  els.sessionSetEditorForm.isWarmup.checked = Boolean(entry.isWarmup);
+  els.sessionSetEditorDialog.showModal();
+}
+
+function saveSessionSetEditor(event) {
+  event.preventDefault();
+  const form = new FormData(els.sessionSetEditorForm);
+  const entryId = String(form.get("entryId") || "");
+  if (!entryId) return;
   const result = updateSessionSet(store.state, entryId, {
-    weight: Number(weight),
-    reps: Number(reps),
-    rpe: rpe === "" ? "" : Number(rpe),
-    rest: Number(rest),
-    isWarmup
+    weight: Number(form.get("weight")),
+    reps: Number(form.get("reps")),
+    rpe: form.get("rpe") === "" ? "" : Number(form.get("rpe")),
+    rest: Number(form.get("rest")),
+    isWarmup: form.get("isWarmup") === "on"
   });
   if (!result.ok) {
     toast(els, result.message);
     return;
   }
+  els.sessionSetEditorDialog.close();
   store.queueSave();
   renderSessionArea();
   renderDashboardArea();
+  renderAnalyticsArea();
   toast(els, result.message);
 }
 
@@ -851,6 +891,15 @@ function focusExerciseCard(exerciseId) {
   if (card.tagName.toLowerCase() === "details") card.open = true;
   card.scrollIntoView({ behavior: "smooth", block: "start" });
   document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`)?.focus();
+}
+
+function jumpToNextExercise(fromExerciseId = "") {
+  const nextExerciseId = getNextSuggestedExerciseId(store.state, fromExerciseId || store.state.session.currentExerciseId);
+  if (!nextExerciseId) {
+    toast(els, "No hay más ejercicios pendientes.");
+    return;
+  }
+  focusExerciseCard(nextExerciseId);
 }
 
 function saveWorkoutFromForm(event) {

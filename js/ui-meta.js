@@ -25,12 +25,19 @@ export function renderAnalytics(state, els, exerciseOptions) {
 function renderAnalyticsHighlights(state, els) {
   const items = buildTrendItems(state);
   const adherence = computeAdherence(state);
+  const weekSeries = buildWeeklyVolumeSeries(state);
+  const latestWeek = weekSeries[weekSeries.length - 1];
+  const previousWeek = weekSeries[weekSeries.length - 2];
+  const volumeDelta = latestWeek && previousWeek ? latestWeek.value - previousWeek.value : null;
   const summary = cardHtml({
     title: "Qué cambió esta semana",
     subtitle: adherence.workoutsPerWeek.target != null
       ? `Esta semana llevas ${adherence.workoutsPerWeek.current}/${adherence.workoutsPerWeek.target} sesiones frente a tu objetivo.`
       : "Define objetivos de hábito para tener una lectura de ritmo semanal.",
-    chips: [{ label: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Ritmo sólido" : "Ritmo mejorable", type: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" }]
+    chips: [
+      { label: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Ritmo sólido" : "Ritmo mejorable", type: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" },
+      ...(volumeDelta == null ? [] : [{ label: `${volumeDelta >= 0 ? "+" : ""}${formatNumber(volumeDelta)} kg vs semana previa`, type: volumeDelta >= 0 ? "success" : "warning" }])
+    ]
   });
   const keyItems = items.slice(0, 2).map((item) => cardHtml(item));
   els.analyticsHighlights.innerHTML = [summary, ...keyItems].join("");

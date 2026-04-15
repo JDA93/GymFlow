@@ -70,6 +70,8 @@ export function defaultState() {
       editingRoutineId: "",
       editingMeasurementId: "",
       editingGroupId: "",
+      routineSearch: "",
+      routineDayFilter: "all",
       dashboardExerciseId: "",
       dashboardExerciseMetric: "e1rm",
       dashboardMetric: "bodyWeight",
