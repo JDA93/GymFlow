@@ -24,7 +24,15 @@ export function renderAnalytics(state, els, exerciseOptions) {
 
 function renderAnalyticsHighlights(state, els) {
   const items = buildTrendItems(state);
-  els.analyticsHighlights.innerHTML = items.length ? items.map((item) => cardHtml(item)).join("") : emptyHtml("Sin tendencias suficientes todavía.");
+  const adherence = computeAdherence(state);
+  const summary = cardHtml({
+    title: "Resumen de evolución",
+    subtitle: adherence.workoutsPerWeek.target != null
+      ? `Esta semana llevas ${adherence.workoutsPerWeek.current}/${adherence.workoutsPerWeek.target} sesiones frente a tu objetivo.`
+      : "Define objetivos de hábito para tener una lectura de ritmo semanal.",
+    chips: [{ label: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Ritmo sólido" : "Ritmo mejorable", type: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" }]
+  });
+  els.analyticsHighlights.innerHTML = [summary, ...(items.length ? items.map((item) => cardHtml(item)) : [])].join("");
 }
 
 function renderAnalyticsCharts(state, els, exerciseOptions) {
@@ -296,24 +304,40 @@ export function renderPreferencesForm(state, els) {
 export function renderPwaStatus(els, pwaStatus, storageStatus) {
   const items = [
     {
+      title: "Compatibilidad de instalación",
+      subtitle: !pwaStatus.secureContext
+        ? "La instalación PWA requiere HTTPS o localhost."
+        : pwaStatus.standalone
+          ? "La app ya está instalada y ejecutándose en modo standalone."
+          : pwaStatus.ios
+            ? "En iPhone: Compartir > Añadir a pantalla de inicio."
+            : pwaStatus.installAvailable
+              ? "Este navegador ya habilitó la instalación desde el botón."
+              : "Aún no se cumplen todos los criterios de instalación en esta sesión.",
+      chips: [{ label: pwaStatus.standalone ? "Instalada" : pwaStatus.installAvailable ? "Lista" : "Pendiente", type: pwaStatus.standalone ? "success" : pwaStatus.installAvailable ? "warning" : "ghost" }]
+    },
+    {
       title: "Manifest e iconos",
-      subtitle: pwaStatus.manifestPresent ? "Manifest enlazado e iconos resueltos." : "No se ha encontrado el manifest o faltan iconos.",
+      subtitle: pwaStatus.manifestPresent
+        ? "Manifest enlazado y assets principales detectados."
+        : "Falta manifest o iconos; revisa para asegurar instalabilidad.",
       chips: [{ label: pwaStatus.manifestPresent ? "OK" : "Revisar", type: pwaStatus.manifestPresent ? "success" : "danger" }]
     },
     {
       title: "Service worker",
-      subtitle: !pwaStatus.swSupported ? "Este navegador no soporta service worker." : pwaStatus.registration ? (pwaStatus.controlled ? "Registrado y controlando esta pestaña." : "Registrado, pero aún no controla esta pestaña.") : "Aún no hay registro activo.",
-      chips: [{ label: !pwaStatus.swSupported ? "No soportado" : pwaStatus.registration ? (pwaStatus.controlled ? "Activo" : "Registrado") : "Pendiente", type: !pwaStatus.swSupported ? "warning" : pwaStatus.registration ? (pwaStatus.controlled ? "success" : "warning") : "ghost" }]
+      subtitle: !pwaStatus.swSupported
+        ? "Este navegador no soporta service worker."
+        : pwaStatus.registration
+          ? (pwaStatus.controlled ? "Registrado y controlando esta pestaña." : "Registrado, pero aún sin controlar esta pestaña.")
+          : "No se detecta registro activo todavía.",
+      chips: [{ label: !pwaStatus.swSupported ? "No soportado" : pwaStatus.controlled ? "Activo" : pwaStatus.registration ? "Registrado" : "Pendiente", type: !pwaStatus.swSupported ? "warning" : pwaStatus.controlled ? "success" : "warning" }]
     },
     {
-      title: "Instalación",
-      subtitle: pwaStatus.standalone ? "La app ya está abierta como instalada." : pwaStatus.ios ? "En iPhone usa Compartir > Añadir a pantalla de inicio." : pwaStatus.installAvailable ? "El navegador ya permite instalarla desde el botón." : "Falta abrirla en un navegador compatible servido por HTTP/HTTPS.",
-      chips: [{ label: pwaStatus.standalone ? "Instalada" : pwaStatus.installAvailable ? "Lista para instalar" : "Pendiente", type: pwaStatus.standalone ? "success" : pwaStatus.installAvailable ? "warning" : "ghost" }]
-    },
-    {
-      title: "Guardado",
-      subtitle: storageStatus.mode === "indexeddb" ? "Persistencia principal en IndexedDB con respaldo local." : "Se ha activado el modo de respaldo local porque IndexedDB ha fallado o no está disponible.",
-      chips: [{ label: storageStatus.mode === "indexeddb" ? "IndexedDB" : "Respaldo local", type: storageStatus.mode === "indexeddb" ? "success" : "warning" }]
+      title: "Guardado local y offline",
+      subtitle: storageStatus.mode === "indexeddb"
+        ? "Guardado principal en IndexedDB con respaldo local automático."
+        : "Se usa respaldo local porque IndexedDB no está disponible en este entorno.",
+      chips: [{ label: storageStatus.mode === "indexeddb" ? "Persistencia robusta" : "Modo respaldo", type: storageStatus.mode === "indexeddb" ? "success" : "warning" }]
     }
   ];
 

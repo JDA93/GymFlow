@@ -20,9 +20,9 @@
 
       <header class="topbar">
         <div>
-          <p class="eyebrow">PWA instalable · offline-first · IndexedDB + respaldo · sesión real</p>
+          <p class="eyebrow">GymFlow Pro · offline-first</p>
           <h1>GymFlow Pro</h1>
-          <p class="subtitle">Más pulida, más segura y mucho más rápida para entrenar de verdad.</p>
+          <p class="subtitle">Rápida para entrenar, robusta para guardar y clara para decidir qué toca hoy.</p>
         </div>
 
         <div class="topbar-actions">
@@ -189,8 +189,10 @@
                 <div class="session-actions-row">
                   <button id="startSessionBtn">Iniciar sesión</button>
                   <button id="copyLastSessionBtn" class="ghost">Copiar última</button>
-                  <button id="discardSessionBtn" class="ghost">Descartar</button>
-                  <button id="endSessionBtn" class="ghost">Cerrar</button>
+                  <button id="endSessionBtn" class="ghost">Cerrar y guardar</button>
+                </div>
+                <div class="danger-zone-inline">
+                  <button id="discardSessionBtn" class="ghost danger-ghost" type="button">Descartar sesión</button>
                 </div>
               </div>
 
@@ -218,7 +220,7 @@
             </article>
 
             <aside class="session-side-column">
-              <article class="card">
+              <article class="card rest-card">
                 <div class="card-head">
                   <div>
                     <h2>Descanso</h2>
@@ -308,16 +310,20 @@
           <article class="card">
             <div class="card-head">
               <div>
-                <h2>Más herramientas</h2>
-                <p>Aquí agrupas lo estratégico: planificar, medir, evolucionar y configurar.</p>
+                <h2>Centro de utilidades</h2>
+                <p>Planifica, revisa progreso y gestiona el sistema sin salir del flujo principal.</p>
               </div>
             </div>
-            <div class="more-grid">
-              <button class="ghost more-link" data-action="open-tab" data-id="routines">Rutinas</button>
-              <button class="ghost more-link" data-action="open-tab" data-id="measurements">Medidas</button>
-              <button class="ghost more-link" data-action="open-tab" data-id="analytics">Evolución</button>
-              <button class="ghost more-link" data-action="open-tab" data-id="goals">Objetivos</button>
-              <button class="ghost more-link" data-action="open-tab" data-id="settings">Ajustes</button>
+            <div class="more-last" id="moreLastSection" hidden>
+              <p class="helper-line">Última sección usada</p>
+              <button class="ghost" id="moreLastSectionBtn" data-action="open-last-more-section">Volver a —</button>
+            </div>
+            <div class="more-grid more-grid--cards">
+              <button class="ghost more-link" data-action="open-tab" data-id="routines"><strong>📋 Rutinas</strong><span>Construir, ordenar y lanzar sesiones</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="measurements"><strong>📏 Medidas</strong><span>Peso, cintura, grasa y tendencias</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="analytics"><strong>📈 Evolución</strong><span>Frecuencia, volumen, estancamientos</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="goals"><strong>🎯 Objetivos</strong><span>Resultados y hábitos en ritmo</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="settings"><strong>🛡️ Ajustes y datos</strong><span>Copia, importación, PWA y seguridad</span></button>
             </div>
           </article>
         </section>
@@ -385,48 +391,54 @@
                   <p>La sesión completa tiene prioridad y los registros manuales quedan diferenciados.</p>
                 </div>
               </div>
-              <div class="toolbar-grid logs-toolbar logs-toolbar--wide">
+              <div class="logs-toolbar-head">
                 <div class="form-field compact-field">
                   <label class="sr-only" for="logSearchInput">Buscar</label>
                   <input id="logSearchInput" placeholder="Buscar por rutina o ejercicio" />
                 </div>
-                <div class="form-field compact-field">
-                  <label class="sr-only" for="logRoutineFilter">Filtrar por rutina</label>
-                  <select id="logRoutineFilter"></select>
-                </div>
-                <div class="form-field compact-field">
-                  <label class="sr-only" for="logMuscleFilter">Grupo muscular</label>
-                  <select id="logMuscleFilter">
-                    <option value="all">Todos los grupos</option>
-                  </select>
-                </div>
-                <div class="form-field compact-field">
-                  <label class="sr-only" for="logSourceFilter">Origen</label>
-                  <select id="logSourceFilter">
-                    <option value="all">Todo</option>
-                    <option value="session">Sesión</option>
-                    <option value="manual">Manual</option>
-                  </select>
-                </div>
-                <div class="form-field compact-field">
-                  <label class="sr-only" for="logDatePresetFilter">Fecha</label>
-                  <select id="logDatePresetFilter">
-                    <option value="all">Todo el histórico</option>
-                    <option value="7d">Últimos 7 días</option>
-                    <option value="30d">Últimos 30 días</option>
-                    <option value="90d">Últimos 90 días</option>
-                  </select>
-                </div>
-                <div class="form-field compact-field">
-                  <label class="sr-only" for="logSortSelect">Ordenar</label>
-                  <select id="logSortSelect">
-                    <option value="date_desc">Más recientes</option>
-                    <option value="date_asc">Más antiguos</option>
-                    <option value="weight_desc">Más peso</option>
-                    <option value="exercise_asc">Ejercicio A-Z</option>
-                  </select>
-                </div>
+                <button id="toggleLogFiltersBtn" class="ghost" type="button" aria-expanded="false" aria-controls="logFiltersPanel">Filtros</button>
               </div>
+              <details id="logFiltersPanel" class="details-panel logs-filters-panel">
+                <summary>Opciones de filtrado y orden</summary>
+                <div class="toolbar-grid logs-toolbar logs-toolbar--wide details-body">
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logRoutineFilter">Filtrar por rutina</label>
+                    <select id="logRoutineFilter"></select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logMuscleFilter">Grupo muscular</label>
+                    <select id="logMuscleFilter">
+                      <option value="all">Todos los grupos</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logSourceFilter">Origen</label>
+                    <select id="logSourceFilter">
+                      <option value="all">Todo</option>
+                      <option value="session">Sesión</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logDatePresetFilter">Fecha</label>
+                    <select id="logDatePresetFilter">
+                      <option value="all">Todo el histórico</option>
+                      <option value="7d">Últimos 7 días</option>
+                      <option value="30d">Últimos 30 días</option>
+                      <option value="90d">Últimos 90 días</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logSortSelect">Ordenar</label>
+                    <select id="logSortSelect">
+                      <option value="date_desc">Más recientes</option>
+                      <option value="date_asc">Más antiguos</option>
+                      <option value="weight_desc">Más peso</option>
+                      <option value="exercise_asc">Ejercicio A-Z</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
               <div id="workoutList" class="list"></div>
             </article>
 
@@ -767,6 +779,7 @@
                 </div>
               </div>
               <div class="settings-actions-block">
+                <p class="helper-line">Tus datos se guardan localmente en este dispositivo (IndexedDB con respaldo local). Exporta copias periódicas para máxima tranquilidad.</p>
                 <div class="actions-row settings-actions-row">
                   <button id="exportBtn" class="ghost" type="button">Exportar JSON</button>
                   <button id="exportCsvBtn" class="ghost" type="button">Exportar CSV</button>
@@ -774,7 +787,10 @@
                     <span>Importar JSON</span>
                     <input id="importInput" type="file" accept="application/json" hidden />
                   </label>
-                  <button id="resetBtn" class="danger" type="button">Resetear datos</button>
+                </div>
+                <div class="danger-zone">
+                  <p class="helper-line">Peligro: borra todo el historial, rutinas, objetivos y sesión activa.</p>
+                  <button id="resetBtn" class="danger" type="button">Resetear todos los datos</button>
                 </div>
               </div>
               <div id="pwaStatusBox" class="list"></div>

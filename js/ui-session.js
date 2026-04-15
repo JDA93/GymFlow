@@ -73,12 +73,13 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
     const done = status.workingEntries.length > setIndex;
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
   }).join("");
-  const stateClass = status.skipped ? "skipped" : status.completed ? "completed" : status.inProgress ? "in-progress" : "";
+  const isNext = nextExerciseId === exercise.id && !status.completed && !status.skipped;
+  const stateClass = `${status.skipped ? "skipped" : status.completed ? "completed" : status.inProgress ? "in-progress" : ""} ${isNext ? "is-next" : ""}`.trim();
   const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (!status.completed && !status.skipped && index === 0);
   const summary = `
     <summary class="session-exercise-summary">
       <strong>${index + 1}. ${escapeHtml(exercise.name)}</strong>
-      <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : shouldExpand ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado" : shouldExpand ? "Ahora toca" : "Pendiente"}</span>
+      <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : isNext ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado" : isNext ? "Ahora toca" : "Pendiente"}</span>
     </summary>
   `;
 
@@ -110,6 +111,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
         <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : nextExerciseId === exercise.id ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado automático" : nextExerciseId === exercise.id ? "Ahora toca" : `${status.workingEntries.length} guardadas`}</span>
       </div>
       <p class="helper-line">${escapeHtml(status.skipped ? "Ejercicio apartado temporalmente para no romper el flujo. Puedes reactivarlo cuando quieras." : suggestion.reason)}</p>
+      ${isNext ? `<p class="helper-line helper-line--strong">Siguiente recomendación activa para mantener el ritmo.</p>` : ""}
       ${exercise.notes ? `<p class="helper-line helper-line--strong">Nota: ${escapeHtml(exercise.notes)}</p>` : ""}
 
       <div class="session-series-grid">
