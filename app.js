@@ -132,12 +132,14 @@ let muscleOptions = [];
 let wakeLock = null;
 let tickInterval = null;
 let editingEntriesContext = null;
+let selectedSessionRoutineId = "";
 
 boot();
 
 async function boot() {
   store = await createStore(els.saveStatusBadge);
   ensureMinimumData();
+  selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
   syncAllSessionHistory(store.state);
   pwa = createPwaManager(els, () => renderSettingsArea());
   await pwa.init();
@@ -203,6 +205,10 @@ function bindEvents() {
     store.state.ui.analyticsLiftId = event.target.value;
     renderAnalyticsArea();
     store.queueSave();
+  });
+
+  els.sessionRoutineSelect.addEventListener("change", (event) => {
+    selectedSessionRoutineId = event.target.value || "";
   });
 
   els.startSessionBtn.addEventListener("click", startSessionFromSelect);
@@ -464,7 +470,14 @@ function populateRoutineSelects() {
   els.sessionRoutineSelect.innerHTML = `<option value="">Selecciona rutina</option>${routineOptions}`;
   els.workoutRoutineSelect.innerHTML = `<option value="">Sin rutina</option>${routineOptions}`;
   els.logRoutineFilter.innerHTML = `<option value="all">Todas las rutinas</option>${routineOptions}`;
-  els.sessionRoutineSelect.value = store.state.session.routineId || "";
+
+  const hasRoutine = (id) => Boolean(id && store.state.routines.some((item) => item.id === id));
+  const preferredId = store.state.session.active
+    ? store.state.session.routineId
+    : (hasRoutine(selectedSessionRoutineId) ? selectedSessionRoutineId : (store.state.routines[0]?.id || ""));
+  selectedSessionRoutineId = preferredId || "";
+  els.sessionRoutineSelect.value = preferredId || "";
+
   els.logRoutineFilter.value = store.state.ui.logRoutine || "all";
 }
 
@@ -499,7 +512,10 @@ function populateRoutineLibraryFilters() {
   const days = [...new Set(store.state.routines.map((item) => String(item.day || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   els.routineDayFilter.innerHTML = `<option value="all">Todos los días / bloques</option>${days.map((day) => `<option value="${day}">${day}</option>`).join("")}`;
   els.routineSearchInput.value = store.state.ui.routineSearch || "";
-  els.routineDayFilter.value = store.state.ui.routineDayFilter || "all";
+  const requestedDayFilter = store.state.ui.routineDayFilter || "all";
+  const isValidDayFilter = requestedDayFilter === "all" || days.includes(requestedDayFilter);
+  if (!isValidDayFilter) store.state.ui.routineDayFilter = "all";
+  els.routineDayFilter.value = isValidDayFilter ? requestedDayFilter : "all";
 }
 
 function renderLogsArea() {
@@ -619,10 +635,24 @@ function setDefaultDates() {
 }
 
 function startSessionFromSelect() {
-  startRoutineById(els.sessionRoutineSelect.value);
+  const routineId = els.sessionRoutineSelect.value || selectedSessionRoutineId || "";
+  startRoutineById(routineId);
 }
 
 function startRoutineById(routineId) {
+  if (!routineId) {
+    toast(els, "Selecciona una rutina para iniciar sesión.");
+    return;
+  }
+  const routineExists = store.state.routines.some((item) => item.id === routineId);
+  if (!routineExists) {
+    selectedSessionRoutineId = "";
+    populateRoutineSelects();
+    toast(els, "La rutina seleccionada ya no existe. Elige otra desde Rutinas.");
+    return;
+  }
+
+  selectedSessionRoutineId = routineId;
   const result = beginSessionFromRoutine(store.state, routineId, window.confirm);
   if (result.status === "started") {
     stopRestTimer();
@@ -1085,6 +1115,7 @@ function editRoutine(id) {
   els.routineForm.notes.value = routine.notes || "";
   els.exerciseRows.innerHTML = "";
   routine.exercises.forEach((exercise) => addExerciseRow(exercise));
+  selectedSessionRoutineId = routine.id;
   setActiveTab(store.state, "routines");
   window.scrollTo({ top: 0, behavior: "smooth" });
 }

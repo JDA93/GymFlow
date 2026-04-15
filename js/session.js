@@ -39,6 +39,14 @@ export function describeActiveSessionRisk(state) {
 export function beginSessionFromRoutine(state, routineId, confirmReplace = window.confirm) {
   if (!routineId) return { status: "error", message: "Selecciona una rutina." };
 
+  const routine = state.routines.find((item) => item.id === routineId);
+  if (!routine) {
+    return { status: "error", message: "La rutina seleccionada ya no existe. Abre Rutinas y elige una válida." };
+  }
+  if (!Array.isArray(routine.exercises) || !routine.exercises.length) {
+    return { status: "error", message: "La rutina seleccionada no tiene ejercicios. Añade al menos uno antes de iniciar." };
+  }
+
   if (state.session.active) {
     if (state.session.routineId === routineId) {
       return { status: "existing", message: "Ya tienes esta sesión activa. Continúa donde la dejaste." };
