@@ -3,12 +3,31 @@ import { cardHtml, emptyHtml } from "./ui-common.js";
 import { formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
 
 export function renderRoutines(state, els) {
-  if (!state.routines.length) {
-    els.routineList.innerHTML = emptyHtml("No hay rutinas todavía.");
+  const search = String(state.ui.routineSearch || "").trim().toLowerCase();
+  const dayFilter = state.ui.routineDayFilter || "all";
+  const routines = state.routines.filter((routine) => {
+    const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
+    if (!dayMatches) return false;
+    if (!search) return true;
+    const haystack = [routine.name, routine.day, routine.focus, ...(routine.exercises || []).map((item) => item.name)].join(" ").toLowerCase();
+    return haystack.includes(search);
+  });
+
+  if (els.routineFilterSummary) {
+    const bits = [];
+    if (search) bits.push(`búsqueda "${search}"`);
+    if (dayFilter !== "all") bits.push(`bloque ${dayFilter}`);
+    els.routineFilterSummary.textContent = bits.length
+      ? `${routines.length} rutinas visibles · filtros: ${bits.join(" · ")}.`
+      : `${routines.length} rutinas disponibles en biblioteca.`;
+  }
+
+  if (!routines.length) {
+    els.routineList.innerHTML = emptyHtml(state.routines.length ? "No hay rutinas que coincidan con los filtros." : "No hay rutinas todavía.");
     return;
   }
 
-  els.routineList.innerHTML = state.routines.map((routine) => {
+  els.routineList.innerHTML = routines.map((routine) => {
     const meta = buildRoutineMetadata(state, routine);
     const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
     const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
@@ -157,6 +176,11 @@ export function renderPrList(state, els) {
 
 export function renderMeasurements(state, els) {
   const measurements = buildMeasurementRows(state);
+  const trendLabel = (delta) => {
+    if (delta == null) return "Sin tendencia";
+    if (Math.abs(delta) < 0.2) return "Estable";
+    return delta < 0 ? "Mejorando" : "Deriva al alza";
+  };
   els.measurementList.innerHTML = measurements.length ? measurements.map((item) => `
     <article class="list-item measurement-card">
       <div class="list-head">
@@ -170,6 +194,7 @@ export function renderMeasurements(state, els) {
         <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : `${item.deltaBodyWeight < 0 ? "↘ " : item.deltaBodyWeight > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyWeight, " kg")}`}</span>
         <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : `${item.deltaWaist < 0 ? "↘ " : item.deltaWaist > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaWaist, " cm")}`}</span>
         <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : `${item.deltaBodyFat < 0 ? "↘ " : item.deltaBodyFat > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyFat, " %")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">${trendLabel(item.deltaWaist)}</span>
         <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
         <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
         <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>

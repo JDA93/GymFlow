@@ -382,6 +382,19 @@
                   <p>Con metadatos para decidir rápido cuál te conviene hoy.</p>
                 </div>
               </div>
+              <div class="toolbar-grid routine-library-toolbar">
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="routineSearchInput">Buscar rutina</label>
+                  <input id="routineSearchInput" placeholder="Buscar rutina o ejercicio" />
+                </div>
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="routineDayFilter">Filtrar por día</label>
+                  <select id="routineDayFilter">
+                    <option value="all">Todos los días / bloques</option>
+                  </select>
+                </div>
+              </div>
+              <p id="routineFilterSummary" class="helper-line log-filter-summary"></p>
               <div id="routineList" class="list"></div>
             </article>
           </div>
@@ -828,6 +841,39 @@
         <div id="groupEditorContent"></div>
         <div class="actions-row dialog-actions">
           <button type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="sessionSetEditorDialog" class="dialog-shell" aria-labelledby="sessionSetEditorTitle">
+      <form id="sessionSetEditorForm" class="form-grid">
+        <h3 id="sessionSetEditorTitle">Editar serie</h3>
+        <input type="hidden" name="entryId" />
+        <div class="mini-grid">
+          <div class="form-field">
+            <label for="sessionEditorWeight">Peso</label>
+            <input id="sessionEditorWeight" name="weight" type="number" min="0" step="0.5" required />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorReps">Reps</label>
+            <input id="sessionEditorReps" name="reps" type="number" min="1" step="1" required />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorRpe">RPE</label>
+            <input id="sessionEditorRpe" name="rpe" type="number" min="1" max="10" step="0.5" />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorRest">Descanso</label>
+            <input id="sessionEditorRest" name="rest" type="number" min="0" step="15" />
+          </div>
+        </div>
+        <label class="switch-row compact-switch">
+          <input type="checkbox" name="isWarmup" id="sessionEditorWarmup" />
+          <span>Marcar como warm-up</span>
+        </label>
+        <div class="session-actions-row">
+          <button type="submit">Guardar cambios</button>
+          <button type="button" id="cancelSessionSetEditorBtn" class="ghost">Cancelar</button>
         </div>
       </form>
     </dialog>

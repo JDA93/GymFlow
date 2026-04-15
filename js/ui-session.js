@@ -65,7 +65,7 @@ export function renderSession(state, els) {
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="focus-current-exercise" data-id="${nextExerciseId || ""}">Ir al ejercicio</button>
-        <button class="ghost small" data-action="jump-next-exercise" data-id="${nextExerciseId || ""}">Siguiente</button>
+        <button class="ghost small" data-action="jump-next-exercise" data-id="${nextExerciseId || ""}">Saltar al siguiente pendiente</button>
       </div>
     </div>
   `;
@@ -129,6 +129,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
       </div>
       <p class="helper-line">${escapeHtml(status.skipped ? "Ejercicio apartado temporalmente para no romper el flujo. Puedes reactivarlo cuando quieras." : suggestion.reason)}</p>
       ${isNext ? `<p class="helper-line helper-line--strong">Este ejercicio está en foco ahora.</p>` : ""}
+      ${status.inProgress && !status.completed ? `<p class="helper-line helper-line--strong">Llevas ${status.workingEntries.length}/${status.targetSets || "?"} series efectivas.</p>` : ""}
       ${exercise.notes ? `<p class="helper-line helper-line--strong">Nota: ${escapeHtml(exercise.notes)}</p>` : ""}
 
       <div class="session-series-grid">
