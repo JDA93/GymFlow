@@ -151,12 +151,15 @@ function renderRecentStory(state, els) {
     chips: item.kind === "session"
       ? [
         { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
-        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" }
+        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" },
+        ...(item.notes ? [{ label: "Incluye notas", type: "warning" }] : [])
       ]
       : [
         { label: item.routineName || "Registro manual", type: "ghost" },
-        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" }
-      ]
+        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
+        ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
+      ],
+    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
   }));
   els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
 }

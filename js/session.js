@@ -182,6 +182,29 @@ export function deleteSessionSet(state, entryId) {
   return { ok: true, message: "Serie eliminada.", removed };
 }
 
+export function updateSessionSet(state, entryId, payload) {
+  const index = state.session.setEntries.findIndex((item) => item.id === entryId);
+  if (index < 0) return { ok: false, message: "No se ha encontrado la serie para editar." };
+  const current = state.session.setEntries[index];
+  const weight = Number(payload.weight);
+  const reps = Number(payload.reps);
+  const rpe = payload.rpe === "" || payload.rpe == null ? "" : optionalNumber(payload.rpe, { min: 1, max: 10 });
+  if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
+    return { ok: false, message: "La edición requiere peso válido y reps mayores a 0." };
+  }
+  state.session.setEntries[index] = {
+    ...current,
+    weight,
+    reps,
+    rpe,
+    isWarmup: Boolean(payload.isWarmup),
+    rest: safeNumber(payload.rest || current.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS),
+    updatedAt: new Date().toISOString()
+  };
+  recomputeCompletedExercises(state);
+  return { ok: true, message: "Serie actualizada." };
+}
+
 export function restoreLastDeletedSessionSet(state) {
   if (!state.session.lastDeletedSet) return { ok: false, message: "No hay una serie reciente para recuperar." };
   state.session.setEntries.push({ ...state.session.lastDeletedSet, id: uid(), createdAt: new Date().toISOString() });

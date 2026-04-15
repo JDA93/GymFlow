@@ -33,6 +33,8 @@ export function renderSession(state, els) {
   const progress = Math.round((effectiveCompleted / progressBase) * 100);
   const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
   const nextName = routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—";
+  const currentExercise = routine.exercises.find((exercise) => exercise.id === nextExerciseId) || routine.exercises[0] || null;
+  const currentSuggestion = currentExercise ? nextLoadSuggestionForExercise(state, currentExercise) : null;
 
   const header = `
     <div class="list-item highlight session-header-card">
@@ -54,9 +56,22 @@ export function renderSession(state, els) {
       </div>
     </div>
   `;
+  const sticky = `
+    <div class="session-sticky-rail" role="region" aria-label="Acciones rápidas de sesión">
+      <div>
+        <p class="eyebrow-dark">Ahora</p>
+        <strong>${escapeHtml(currentExercise?.name || "Sin foco")}</strong>
+        <p class="helper-line">Siguiente sugerencia: ${currentSuggestion ? `${formatNumber(currentSuggestion.value)} kg` : "—"} · ${pendingCount} pendientes</p>
+      </div>
+      <div class="actions-row">
+        <button class="ghost small" data-action="focus-current-exercise" data-id="${nextExerciseId || ""}">Ir al ejercicio</button>
+        <button class="ghost small" data-action="jump-next-exercise" data-id="${nextExerciseId || ""}">Siguiente</button>
+      </div>
+    </div>
+  `;
 
   const cards = routine.exercises.map((exercise, index) => renderExerciseCard(state, exercise, index, nextExerciseId)).join("");
-  els.activeSessionCard.innerHTML = header + cards;
+  els.activeSessionCard.innerHTML = header + sticky + cards;
 }
 
 function renderExerciseCard(state, exercise, index, nextExerciseId) {
@@ -162,9 +177,10 @@ function buildSessionTable(entries) {
             <th>Tipo</th>
             <th>Peso</th>
             <th>Reps</th>
-            <th>RPE</th>
-            <th>Acción</th>
-          </tr>
+              <th>RPE</th>
+              <th>Descanso</th>
+              <th>Acción</th>
+            </tr>
         </thead>
         <tbody>
           ${entries.map((entry, index) => `
@@ -174,7 +190,12 @@ function buildSessionTable(entries) {
               <td>${formatNumber(entry.weight)} kg</td>
               <td>${entry.reps}</td>
               <td>${entry.rpe === "" ? "—" : entry.rpe}</td>
-              <td><button class="ghost small" data-action="delete-session-set" data-id="${entry.id}">Quitar</button></td>
+              <td>${entry.rest || "—"}s</td>
+              <td class="session-row-actions">
+                <button class="ghost small" data-action="prefill-session-set" data-id="${entry.id}">Cargar</button>
+                <button class="ghost small" data-action="edit-session-set" data-id="${entry.id}">Editar</button>
+                <button class="ghost small" data-action="delete-session-set" data-id="${entry.id}">Quitar</button>
+              </td>
             </tr>
           `).join("")}
         </tbody>

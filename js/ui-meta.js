@@ -141,6 +141,7 @@ export function renderGoalSummary(state, els) {
       label: "Peso",
       current: latestMeasurement?.bodyWeight,
       baseline: oldestMeasurement?.bodyWeight,
+      baselineDate: oldestMeasurement?.date || "",
       target: goals.resultGoals.bodyWeight,
       suffix: "kg"
     },
@@ -149,6 +150,7 @@ export function renderGoalSummary(state, els) {
       label: "Cintura",
       current: latestMeasurement?.waist,
       baseline: oldestMeasurement?.waist,
+      baselineDate: oldestMeasurement?.date || "",
       target: goals.resultGoals.waist,
       suffix: "cm"
     },
@@ -157,6 +159,7 @@ export function renderGoalSummary(state, els) {
       label: "Grasa corporal",
       current: latestMeasurement?.bodyFat,
       baseline: oldestMeasurement?.bodyFat,
+      baselineDate: oldestMeasurement?.date || "",
       target: goals.resultGoals.bodyFat,
       suffix: "%"
     },
@@ -165,6 +168,7 @@ export function renderGoalSummary(state, els) {
       label: "Press banca",
       current: bestMap["bench-press"]?.value,
       baseline: firstLiftMap["bench-press"]?.value,
+      baselineDate: firstLiftMap["bench-press"]?.date || "",
       target: goals.resultGoals.bench,
       suffix: "kg"
     },
@@ -173,6 +177,7 @@ export function renderGoalSummary(state, els) {
       label: "Sentadilla",
       current: bestMap["squat"]?.value,
       baseline: firstLiftMap["squat"]?.value,
+      baselineDate: firstLiftMap["squat"]?.date || "",
       target: goals.resultGoals.squat,
       suffix: "kg"
     },
@@ -181,6 +186,7 @@ export function renderGoalSummary(state, els) {
       label: "Peso muerto",
       current: bestMap["deadlift"]?.value || bestMap["romanian-deadlift"]?.value,
       baseline: firstLiftMap["deadlift"]?.value || firstLiftMap["romanian-deadlift"]?.value,
+      baselineDate: firstLiftMap["deadlift"]?.date || firstLiftMap["romanian-deadlift"]?.date || "",
       target: goals.resultGoals.deadlift,
       suffix: "kg"
     }
@@ -205,13 +211,13 @@ function buildGoalDateStatus(goalDate) {
   return `Fecha superada hace ${Math.abs(remaining)} días`;
 }
 
-function goalCard({ label, current, target, baseline, suffix }, goalDate) {
+function goalCard({ label, current, target, baseline, baselineDate, suffix }, goalDate) {
   const currentValue = current === "" || current == null ? null : Number(current);
   const targetValue = target === "" || target == null ? null : Number(target);
   const baselineValue = baseline === "" || baseline == null ? null : Number(baseline);
   const progress = computeGoalProgress({ baseline: baselineValue, current: currentValue, target: targetValue });
   const delta = currentValue == null || targetValue == null ? null : targetValue - currentValue;
-  const paceLabel = buildPaceLabel({ baseline: baselineValue, current: currentValue, target: targetValue, goalDate });
+  const paceLabel = buildPaceLabel({ baseline: baselineValue, baselineDate, current: currentValue, target: targetValue, goalDate });
 
   return `
     <article class="list-item">
@@ -234,22 +240,23 @@ function goalCard({ label, current, target, baseline, suffix }, goalDate) {
   `;
 }
 
-function buildPaceLabel({ baseline, current, target, goalDate }) {
-  if (goalDate === "" || goalDate == null || current == null || target == null || baseline == null) return "";
+function buildPaceLabel({ baseline, baselineDate, current, target, goalDate }) {
+  if (!goalDate || current == null || target == null) return "";
   const remaining = daysBetween(todayLocal(), goalDate);
-  if (remaining < 0) return "Fecha superada";
+  if (remaining < 0) return current === target ? "Objetivo cumplido" : "Fecha objetivo superada";
+  if (baseline == null) return "Falta línea base para calcular ritmo";
   const totalDistance = Math.abs(target - baseline);
-  const currentDistance = Math.abs(current - baseline);
   if (!totalDistance) return "Objetivo cumplido";
-  const currentRatio = currentDistance / totalDistance;
-  const expectedRatio = expectedProgressForDate(goalDate);
-  return currentRatio >= expectedRatio ? "Vas en ritmo" : "No vas en ritmo";
-}
-
-function expectedProgressForDate(goalDate) {
-  const remaining = Math.max(0, daysBetween(todayLocal(), goalDate));
-  const horizon = 90;
-  return Math.max(0.12, 1 - Math.min(remaining, horizon) / horizon);
+  const currentDistance = Math.abs(current - baseline);
+  if (!baselineDate) return "Define más histórico para calcular ritmo";
+  const elapsedDays = Math.max(1, daysBetween(baselineDate, todayLocal()));
+  const velocity = currentDistance / elapsedDays;
+  const requiredVelocity = Math.abs(target - current) / Math.max(1, remaining);
+  if (!Number.isFinite(velocity) || velocity <= 0) return "Ritmo incierto: aún faltan más datos";
+  const ratio = velocity / Math.max(requiredVelocity, 0.0001);
+  if (ratio >= 1.15) return "Vas por delante del ritmo";
+  if (ratio >= 0.9) return "Vas en ritmo";
+  return "Vas por debajo del ritmo";
 }
 
 function buildHabitGoalCards(habits, latestMeasurement, state) {
@@ -318,7 +325,7 @@ export function renderPwaStatus(els, pwaStatus, storageStatus) {
             ? "En iPhone: Compartir > Añadir a pantalla de inicio."
             : pwaStatus.installAvailable
               ? "Este navegador ya habilitó la instalación desde el botón."
-              : "Aún no se cumplen todos los criterios de instalación en esta sesión.",
+              : "La instalación aún no está habilitada en esta sesión. Sigue siendo usable desde navegador.",
       chips: [{ label: pwaStatus.standalone ? "Instalada" : pwaStatus.installAvailable ? "Lista" : "Pendiente", type: pwaStatus.standalone ? "success" : pwaStatus.installAvailable ? "warning" : "ghost" }]
     },
     {
@@ -333,9 +340,9 @@ export function renderPwaStatus(els, pwaStatus, storageStatus) {
       subtitle: !pwaStatus.swSupported
         ? "Este navegador no soporta service worker."
         : pwaStatus.registration
-          ? (pwaStatus.controlled ? "Registrado y controlando esta pestaña." : "Registrado, pero aún sin controlar esta pestaña.")
-          : "No se detecta registro activo todavía.",
-      chips: [{ label: !pwaStatus.swSupported ? "No soportado" : pwaStatus.controlled ? "Activo" : pwaStatus.registration ? "Registrado" : "Pendiente", type: !pwaStatus.swSupported ? "warning" : pwaStatus.controlled ? "success" : "warning" }]
+          ? (pwaStatus.controlled ? "Registrado y controlando esta pestaña. Habrá caché offline según versiones ya visitadas." : "Registrado, pero esta pestaña aún no está bajo control. Recarga para finalizar.")
+          : "No se detecta registro activo todavía; sin caché offline confiable.",
+      chips: [{ label: !pwaStatus.swSupported ? "No soportado" : pwaStatus.controlled ? "Activo" : pwaStatus.registration ? "Parcial" : "Pendiente", type: !pwaStatus.swSupported ? "warning" : pwaStatus.controlled ? "success" : "warning" }]
     },
     {
       title: "Guardado local y offline",

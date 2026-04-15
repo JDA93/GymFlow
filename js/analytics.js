@@ -69,7 +69,7 @@ export function computeStats(state) {
       return best;
     }, null);
 
-  const lastSession = [...state.sessionHistory].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.endedAt || "").localeCompare(String(a.endedAt || "")))[0] || null;
+  const lastSession = [...state.sessionHistory].sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))[0] || null;
 
   return {
     daysTrainedThisMonth,
@@ -187,15 +187,13 @@ export function buildWorkoutGroups(state, { includeWarmups = true } = {}) {
 }
 
 export function sortWorkoutGroupsByDateDesc(a, b) {
-  const dateCompare = String(b.date || "").localeCompare(String(a.date || ""));
-  if (dateCompare !== 0) return dateCompare;
-  return String(b.latestCreatedAt || b.primaryId || "").localeCompare(String(a.latestCreatedAt || a.primaryId || ""));
+  return getChronologicalAnchor(b) - getChronologicalAnchor(a);
 }
 
 export function getWorkoutGroupSorter(sortBy) {
   switch (sortBy) {
     case "date_asc":
-      return (a, b) => String(a.date).localeCompare(String(b.date)) || String(a.latestCreatedAt || "").localeCompare(String(b.latestCreatedAt || ""));
+      return (a, b) => getChronologicalAnchor(a) - getChronologicalAnchor(b);
     case "weight_desc":
       return (a, b) => Number(b.maxWeight) - Number(a.maxWeight) || sortWorkoutGroupsByDateDesc(a, b);
     case "exercise_asc":
@@ -221,7 +219,7 @@ export function buildSessionExerciseSummaries(state, sessionId) {
 
 export function buildRecentActivity(state, limit = 6) {
   const sessions = [...state.sessionHistory]
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.endedAt || "").localeCompare(String(a.endedAt || "")))
+    .sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))
     .slice(0, limit)
     .map((item) => ({
       kind: "session",
@@ -231,7 +229,9 @@ export function buildRecentActivity(state, limit = 6) {
       volume: item.volume,
       durationSeconds: item.durationSeconds,
       routineName: item.routineName,
-      sessionId: item.sessionId
+      sessionId: item.sessionId,
+      notes: item.notes || "",
+      sortAnchor: item.endedAt || item.startedAt || `${item.date}T00:00:00`
     }));
 
   const manualGroups = buildWorkoutGroups(state, { includeWarmups: false })
@@ -244,11 +244,13 @@ export function buildRecentActivity(state, limit = 6) {
       date: group.date,
       volume: group.volume,
       bestE1rm: group.bestE1rm,
-      routineName: group.routineName
+      routineName: group.routineName,
+      notes: group.entries.map((entry) => String(entry.notes || "").trim()).find(Boolean) || "",
+      sortAnchor: group.latestCreatedAt || `${group.date}T00:00:00`
     }));
 
   return [...sessions, ...manualGroups]
-    .sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.sessionId || b.title || "").localeCompare(String(a.sessionId || a.title || "")))
+    .sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))
     .slice(0, limit);
 }
 
@@ -541,6 +543,7 @@ export function buildHistoryFeed(state) {
       exercisesCompleted: session.exercisesCompleted,
       exercises,
       sessionId: session.sessionId,
+      notes: session.notes || "",
       sortAnchor: session.endedAt || session.startedAt || `${session.date}T00:00:00`
     };
   });
@@ -564,6 +567,7 @@ export function buildHistoryFeed(state) {
       repsLabel: group.repsLabel,
       groupId: group.groupId,
       entries: group.entries,
+      notes: group.entries.map((entry) => String(entry.notes || "").trim()).find(Boolean) || "",
       sortAnchor: group.latestCreatedAt || `${group.date}T00:00:00`
     }));
 
@@ -584,17 +588,17 @@ export function buildHistoryFeed(state) {
   const sortBy = state.ui.logSort || "date_desc";
   items.sort((a, b) => {
     if (sortBy === "date_asc") {
-      return String(a.date || "").localeCompare(String(b.date || "")) || String(a.sortAnchor || "").localeCompare(String(b.sortAnchor || ""));
+      return getChronologicalAnchor(a) - getChronologicalAnchor(b);
     }
     if (sortBy === "weight_desc") {
       const weightA = a.kind === "session" ? Math.max(0, ...(a.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(a.maxWeight || 0);
       const weightB = b.kind === "session" ? Math.max(0, ...(b.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(b.maxWeight || 0);
-      return weightB - weightA || String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
+      return weightB - weightA || getChronologicalAnchor(b) - getChronologicalAnchor(a);
     }
     if (sortBy === "exercise_asc") {
-      return String(a.title || "").localeCompare(String(b.title || ""), "es") || String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
+      return String(a.title || "").localeCompare(String(b.title || ""), "es") || getChronologicalAnchor(b) - getChronologicalAnchor(a);
     }
-    return String(b.date || "").localeCompare(String(a.date || "")) || String(b.sortAnchor || "").localeCompare(String(a.sortAnchor || ""));
+    return getChronologicalAnchor(b) - getChronologicalAnchor(a);
   });
 
   return items;
@@ -701,4 +705,15 @@ export function computeAdherence(state) {
       ? Number(latestMeasurement.bodyWeight) - Number(previousMeasurement.bodyWeight)
       : null
   };
+}
+
+function getChronologicalAnchor(item) {
+  const iso = item?.sortAnchor || item?.endedAt || item?.latestCreatedAt || item?.createdAt || item?.startedAt || (item?.date ? `${item.date}T00:00:00` : "");
+  const millis = Date.parse(iso);
+  if (Number.isFinite(millis)) return millis;
+  if (item?.date) {
+    const dateMillis = Date.parse(`${item.date}T00:00:00`);
+    return Number.isFinite(dateMillis) ? dateMillis : 0;
+  }
+  return 0;
 }
