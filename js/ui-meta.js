@@ -26,13 +26,14 @@ function renderAnalyticsHighlights(state, els) {
   const items = buildTrendItems(state);
   const adherence = computeAdherence(state);
   const summary = cardHtml({
-    title: "Resumen de evolución",
+    title: "Qué cambió esta semana",
     subtitle: adherence.workoutsPerWeek.target != null
       ? `Esta semana llevas ${adherence.workoutsPerWeek.current}/${adherence.workoutsPerWeek.target} sesiones frente a tu objetivo.`
       : "Define objetivos de hábito para tener una lectura de ritmo semanal.",
     chips: [{ label: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Ritmo sólido" : "Ritmo mejorable", type: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" }]
   });
-  els.analyticsHighlights.innerHTML = [summary, ...(items.length ? items.map((item) => cardHtml(item)) : [])].join("");
+  const keyItems = items.slice(0, 2).map((item) => cardHtml(item));
+  els.analyticsHighlights.innerHTML = [summary, ...keyItems].join("");
 }
 
 function renderAnalyticsCharts(state, els, exerciseOptions) {
@@ -190,7 +191,11 @@ export function renderGoalSummary(state, els) {
   const habitCards = buildHabitGoalCards(goals.habits, latestMeasurement, state);
   cards.push(...habitCards);
 
-  els.goalSummary.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no has definido objetivos.");
+  if (!cards.length) {
+    els.goalSummary.innerHTML = emptyHtml("Todavía no has definido objetivos.");
+    return;
+  }
+  els.goalSummary.innerHTML = cards.join("");
 }
 
 function buildGoalDateStatus(goalDate) {

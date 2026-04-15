@@ -23,6 +23,19 @@ export function hasActiveSessionRisk(state) {
   return Boolean(state.session.active && (state.session.setEntries.length || state.session.notes.trim()));
 }
 
+export function describeActiveSessionRisk(state) {
+  const entries = state.session.setEntries || [];
+  const working = entries.filter((item) => !item.isWarmup).length;
+  const warmups = entries.filter((item) => item.isWarmup).length;
+  const notes = state.session.notes?.trim() ? 1 : 0;
+  if (!working && !warmups && !notes) return "";
+  const parts = [];
+  if (working) parts.push(`${working} series efectivas`);
+  if (warmups) parts.push(`${warmups} warm-up`);
+  if (notes) parts.push("notas");
+  return parts.join(", ");
+}
+
 export function beginSessionFromRoutine(state, routineId, confirmReplace = window.confirm) {
   if (!routineId) return { status: "error", message: "Selecciona una rutina." };
 
@@ -177,7 +190,7 @@ export function restoreLastDeletedSessionSet(state) {
   return { ok: true, message: "Serie recuperada." };
 }
 
-export function copyLastSessionIntoActive(state) {
+export function copyLastSessionIntoActive(state, confirmReplace = window.confirm) {
   const routine = getActiveRoutine(state);
   if (!routine) return { ok: false, message: "Inicia primero una rutina." };
 
@@ -195,6 +208,12 @@ export function copyLastSessionIntoActive(state) {
 
   if (!sourceEntries.length) {
     return { ok: false, message: "La sesión anterior no tiene series guardadas." };
+  }
+
+  const activeRisk = describeActiveSessionRisk(state);
+  if (activeRisk) {
+    const accepted = confirmReplace(`Ya tienes datos en la sesión activa (${activeRisk}). Copiar la última sesión reemplazará esas series. ¿Quieres continuar?`);
+    if (!accepted) return { ok: false, code: "cancelled", message: "Se mantiene la sesión activa actual." };
   }
 
   const now = Date.now();

@@ -20,17 +20,20 @@ export function renderSession(state, els) {
   els.sessionRoutineSelect.value = state.session.routineId || els.sessionRoutineSelect.value || "";
 
   if (!active) {
-    els.activeSessionCard.innerHTML = emptyHtml("Selecciona una rutina e inicia la sesión para ver tu flujo de trabajo aquí.");
+    els.activeSessionCard.innerHTML = emptyHtml("Selecciona una rutina e inicia la sesión para ver un flujo guiado de ahora / siguiente / pendientes.");
     return;
   }
 
   const effectiveCompleted = (routine.exercises || []).filter((exercise) => getExerciseCompletionStatus(state, exercise).completed).length;
   const skippedCount = (routine.exercises || []).filter((exercise) => isExerciseSkipped(state, exercise.id)).length;
+  const pendingCount = Math.max(0, routine.exercises.length - effectiveCompleted - skippedCount);
   const workingSetCount = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
   const warmupSetCount = state.session.setEntries.filter((entry) => entry.isWarmup).length;
   const progressBase = routine.exercises.length || 1;
   const progress = Math.round((effectiveCompleted / progressBase) * 100);
   const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
+  const nextName = routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—";
+
   const header = `
     <div class="list-item highlight session-header-card">
       <div class="list-head">
@@ -44,11 +47,10 @@ export function renderSession(state, els) {
         <div class="progress-bar"><span style="width:${progress}%"></span></div>
         <strong>${progress}%</strong>
       </div>
-      <div class="chip-row">
-        <span class="chip ghost">Siguiente: ${escapeHtml(routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—")}</span>
-        <span class="chip ghost">Omitidos ${skippedCount}</span>
-        <span class="chip ghost">Efectivas ${workingSetCount}</span>
-        <span class="chip ghost">Warm-up ${warmupSetCount}</span>
+      <div class="session-flow-row">
+        <div class="session-flow-pill"><strong>Ahora</strong><span>${escapeHtml(nextName)}</span></div>
+        <div class="session-flow-pill"><strong>Siguiente</strong><span>${pendingCount > 1 ? `${pendingCount - 1} ejercicios` : "Cierre de sesión"}</span></div>
+        <div class="session-flow-pill"><strong>Resumen</strong><span>${workingSetCount} efectivas · ${warmupSetCount} warm-up · ${skippedCount} omitidos</span></div>
       </div>
     </div>
   `;
@@ -74,8 +76,8 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
   }).join("");
   const isNext = nextExerciseId === exercise.id && !status.completed && !status.skipped;
-  const stateClass = `${status.skipped ? "skipped" : status.completed ? "completed" : status.inProgress ? "in-progress" : ""} ${isNext ? "is-next" : ""}`.trim();
-  const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (!status.completed && !status.skipped && index === 0);
+  const stateClass = `${status.skipped ? "skipped" : status.completed ? "completed is-completed-collapsed" : status.inProgress ? "in-progress" : ""} ${isNext ? "is-next" : ""}`.trim();
+  const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (entries.length && !status.completed);
   const summary = `
     <summary class="session-exercise-summary">
       <strong>${index + 1}. ${escapeHtml(exercise.name)}</strong>
@@ -111,7 +113,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
         <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : nextExerciseId === exercise.id ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado automático" : nextExerciseId === exercise.id ? "Ahora toca" : `${status.workingEntries.length} guardadas`}</span>
       </div>
       <p class="helper-line">${escapeHtml(status.skipped ? "Ejercicio apartado temporalmente para no romper el flujo. Puedes reactivarlo cuando quieras." : suggestion.reason)}</p>
-      ${isNext ? `<p class="helper-line helper-line--strong">Siguiente recomendación activa para mantener el ritmo.</p>` : ""}
+      ${isNext ? `<p class="helper-line helper-line--strong">Este ejercicio está en foco ahora.</p>` : ""}
       ${exercise.notes ? `<p class="helper-line helper-line--strong">Nota: ${escapeHtml(exercise.notes)}</p>` : ""}
 
       <div class="session-series-grid">
@@ -140,7 +142,8 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
 
       <div class="session-quick-actions">
         <button class="ghost small" data-action="fill-last-session-values" data-id="${exercise.id}" ${reference ? "" : "disabled"}>Usar última referencia</button>
-        <button class="ghost small" data-action="repeat-last-session-set" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Repetir última serie</button>
+        <button class="ghost small" data-action="repeat-last-session-set" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Rellenar última serie</button>
+        <button class="ghost small" data-action="save-last-session-set-again" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Guardar misma serie otra vez</button>
       </div>
 
       ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}

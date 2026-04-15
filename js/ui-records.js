@@ -11,6 +11,7 @@ export function renderRoutines(state, els) {
   els.routineList.innerHTML = state.routines.map((routine) => {
     const meta = buildRoutineMetadata(state, routine);
     const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
+    const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
     return `
       <article class="list-item routine-card">
         <div class="list-head">
@@ -23,6 +24,7 @@ export function renderRoutines(state, els) {
         <div class="chip-row">
           <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
           <span class="chip ghost">${meta.totalSets} series</span>
+          <span class="chip ghost">~${estimatedMinutes} min</span>
           <span class="chip ${meta.complexityScore >= 24 ? "warning" : meta.complexityScore >= 16 ? "success" : "ghost"}">${meta.complexityLabel}</span>
           ${meta.blockCount ? `<span class="chip ghost">${meta.blockCount} bloques</span>` : ""}
           ${blockPreview.map((block) => `<span class="chip ghost">${block}</span>`).join("")}
@@ -38,8 +40,8 @@ export function renderRoutines(state, els) {
         </div>
         <div class="actions-row">
           <button data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
-          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
           <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
+          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
           <button class="ghost small" data-action="delete-routine" data-id="${routine.id}">Borrar</button>
         </div>
       </article>
@@ -49,12 +51,31 @@ export function renderRoutines(state, els) {
 
 export function renderWorkoutList(state, els) {
   const feed = buildHistoryFeed(state);
+  renderHistoryFilterSummary(state, els, feed.length);
   if (!feed.length) {
     els.workoutList.innerHTML = emptyHtml("No hay registros con esos filtros.");
     return;
   }
 
-  els.workoutList.innerHTML = feed.map((item) => item.kind === "session" ? renderSessionHistoryCard(item) : renderManualHistoryCard(item)).join("");
+  let lastDate = "";
+  els.workoutList.innerHTML = feed.map((item) => {
+    const separator = item.date !== lastDate ? `<p class="history-day-separator">${formatDate(item.date)}</p>` : "";
+    lastDate = item.date;
+    return `${separator}${item.kind === "session" ? renderSessionHistoryCard(item) : renderManualHistoryCard(item)}`;
+  }).join("");
+}
+
+function renderHistoryFilterSummary(state, els, total) {
+  if (!els.logFilterSummary) return;
+  const active = [];
+  if (state.ui.logSearch) active.push(`búsqueda: "${state.ui.logSearch}"`);
+  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina específica");
+  if (state.ui.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
+  if (state.ui.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
+  if (state.ui.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
+  els.logFilterSummary.textContent = active.length
+    ? `${total} resultados · filtros activos (${active.join(" · ")}).`
+    : `${total} resultados · sin filtros activos.`;
 }
 
 function renderSessionHistoryCard(item) {
@@ -63,14 +84,13 @@ function renderSessionHistoryCard(item) {
       <div class="list-head">
         <div>
           <h3 class="list-title">${item.title}</h3>
-          <p class="list-subtitle">${formatDate(item.date)} · Sesión completa · ${item.exercisesCompleted} ejercicios</p>
+          <p class="list-subtitle">Sesión completa · ${item.exercisesCompleted} ejercicios · ${formatDuration(item.durationSeconds || 0)}</p>
         </div>
         <span class="chip success">${formatNumber(item.volume)} kg</span>
       </div>
       <div class="chip-row">
         <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
         <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
-        <span class="chip ghost">${formatDuration(item.durationSeconds || 0)}</span>
         ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
       </div>
       <div class="history-session-exercises">
@@ -96,7 +116,7 @@ function renderManualHistoryCard(item) {
       <div class="list-head">
         <div>
           <h3 class="list-title">${item.title}</h3>
-          <p class="list-subtitle">${formatDate(item.date)}${item.routineName ? ` · ${item.routineName}` : ""} · Registro manual</p>
+          <p class="list-subtitle">Registro manual${item.routineName ? ` · ${item.routineName}` : ""}</p>
         </div>
         <span class="chip ghost">${formatNumber(item.maxWeight)} kg top</span>
       </div>

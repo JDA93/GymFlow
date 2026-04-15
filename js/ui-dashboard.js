@@ -25,7 +25,7 @@ export function renderStats(state, els) {
 export function renderDashboard(state, els, exerciseOptions) {
   renderPrimaryAction(state, els);
   renderQuickSignals(state, els);
-  renderRecommended(state, els);
+  renderLauncher(state, els);
   renderRecentStory(state, els);
   renderExerciseSelect(state, els, exerciseOptions);
   renderExerciseChart(state, els);
@@ -41,9 +41,9 @@ function buildTodayInsight(state, suggestion) {
   if (weeklyTarget > 0) {
     const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
       .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para tu objetivo semanal.`;
+    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
   }
-  return "Mantén el foco en la próxima mejor acción.";
+  return "Prioriza la siguiente acción y ejecuta sin fricción.";
 }
 
 function renderPrimaryAction(state, els) {
@@ -55,14 +55,14 @@ function renderPrimaryAction(state, els) {
     const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
     els.dashboardPrimaryCard.innerHTML = `
       <div class="hero-copy">
-        <span class="pill">Sesión en curso</span>
-        <h2>Continúa tu sesión activa</h2>
+        <span class="pill">En curso</span>
+        <h2>Vuelve a tu sesión activa</h2>
         <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
-        <p>Llevas ${workingSets} series efectivas (${warmupSets} warm-up) y ${formatNumber(volume)} kg de volumen efectivo.</p>
+        <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
         <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
-        <button class="ghost" data-action="open-tab" data-id="session">Ir a Sesión</button>
+        <button class="ghost" data-action="open-tab" data-id="session">Abrir flujo de sesión</button>
       </div>
     `;
     return;
@@ -71,9 +71,9 @@ function renderPrimaryAction(state, els) {
   if (!suggestion.routine) {
     els.dashboardPrimaryCard.innerHTML = `
       <div class="hero-copy">
-        <span class="pill">Sin rutina sugerida</span>
-        <h2>Crea una rutina y arranca</h2>
-        <p>GymFlow Pro está lista para entrenar, pero necesita al menos una rutina o la demo.</p>
+        <span class="pill">Primer paso</span>
+        <h2>Prepara tu primera rutina</h2>
+        <p>GymFlow Pro está lista para entrenar. Crea una rutina o carga demo para empezar en menos de un minuto.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
         <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>
@@ -83,19 +83,48 @@ function renderPrimaryAction(state, els) {
     return;
   }
 
-  const lastLabel = suggestion.daysSince == null ? "Aún sin usar" : relativeDaysLabel(suggestion.daysSince);
+  const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
   els.dashboardPrimaryCard.innerHTML = `
     <div class="hero-copy">
-      <span class="pill">Hoy</span>
-      <h2>Empieza ${suggestion.routine.name}</h2>
+      <span class="pill">Recomendación</span>
+      <h2>Entrena ${suggestion.routine.name} ahora</h2>
       <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
       <p>${suggestion.reason} ${lastLabel}.</p>
     </div>
     <div class="hero-actions hero-actions--stack-mobile">
       <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
-      <button class="ghost" data-action="open-tab" data-id="routines">Ver rutinas</button>
+      <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
     </div>
   `;
+}
+
+function renderLauncher(state, els) {
+  const suggestion = getSuggestedRoutine(state);
+  const cards = [];
+  if (state.session.active) {
+    cards.push(cardHtml({
+      title: "Continuar sesión activa",
+      subtitle: "Retoma exactamente donde te quedaste.",
+      chips: [{ label: "Prioridad alta", type: "success" }],
+      footer: `<button data-action="continue-session">Ir a sesión</button>`
+    }));
+  } else if (suggestion.routine) {
+    cards.push(cardHtml({
+      title: `Arrancar ${suggestion.routine.name}`,
+      subtitle: suggestion.reason,
+      chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
+      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
+    }));
+  }
+
+  cards.push(cardHtml({
+    title: "Check-in corporal",
+    subtitle: "Registra peso, cintura o sueño para mantener contexto.",
+    chips: [{ label: "30 segundos", type: "ghost" }],
+    footer: `<button class="ghost small" data-action="open-tab" data-id="measurements">Log medida</button>`
+  }));
+
+  els.recommendedRoutine.innerHTML = cards.join("");
 }
 
 function renderQuickSignals(state, els) {
@@ -104,8 +133,8 @@ function renderQuickSignals(state, els) {
   const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
   if (stalledExercise) {
     cards.push(cardHtml({
-      title: `Ejercicio con riesgo de estancamiento`,
-      subtitle: `${stalledExercise.exercise} muestra una pendiente casi plana en las últimas 5 referencias.`,
+      title: `Posible estancamiento`,
+      subtitle: `${stalledExercise.exercise} lleva varias referencias planas.`,
       chips: [
         { label: `e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
         { label: formatDate(stalledExercise.date), type: "ghost" }
@@ -113,24 +142,6 @@ function renderQuickSignals(state, els) {
     }));
   }
   els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
-}
-
-function renderRecommended(state, els) {
-  const suggestion = getSuggestedRoutine(state);
-  if (!suggestion.routine) {
-    els.recommendedRoutine.innerHTML = emptyHtml("Crea una rutina para ver una recomendación útil aquí.");
-    return;
-  }
-  const routine = suggestion.routine;
-  els.recommendedRoutine.innerHTML = cardHtml({
-    title: routine.name,
-    subtitle: `${routine.focus || "Sin foco"} · ${(routine.exercises || []).length} ejercicios`,
-    chips: [
-      { label: routine.day || "Sin bloque", type: "ghost" },
-      { label: suggestion.daysSince == null ? "Aún sin usar" : `${suggestion.daysSince} días`, type: suggestion.daysSince != null && suggestion.daysSince >= 4 ? "warning" : "success" }
-    ],
-    footer: `<div class="actions-row"><button data-action="start-routine" data-id="${routine.id}">Empezar</button><button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button></div>`
-  });
 }
 
 function renderRecentStory(state, els) {
