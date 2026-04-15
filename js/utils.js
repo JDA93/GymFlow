@@ -321,9 +321,14 @@ export function percentage(part, total) {
 
 export function relativeDaysLabel(days) {
   if (days == null) return "—";
-  if (days === 0) return "Hoy";
-  if (days === 1) return "Ayer";
-  return `Hace ${days} días`;
+  const numericDays = Number(days);
+  if (!Number.isFinite(numericDays)) return "—";
+  const roundedDays = Math.round(numericDays);
+  if (roundedDays === 0) return "Hoy";
+  if (roundedDays === 1) return "Ayer";
+  if (roundedDays === -1) return "Mañana";
+  if (roundedDays < 0) return `En ${Math.abs(roundedDays)} días`;
+  return `Hace ${roundedDays} días`;
 }
 
 export function moveItem(array, fromIndex, toIndex) {
