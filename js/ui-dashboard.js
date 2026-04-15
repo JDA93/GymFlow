@@ -32,6 +32,20 @@ export function renderDashboard(state, els, exerciseOptions) {
   renderBodyChart(state, els);
 }
 
+function buildTodayInsight(state, suggestion) {
+  const routine = suggestion?.routine;
+  if (routine && suggestion?.daysSince != null && suggestion.daysSince >= 4) {
+    return `Llevas ${suggestion.daysSince} días sin entrenar ${routine.name}.`;
+  }
+  const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
+  if (weeklyTarget > 0) {
+    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
+      .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
+    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para tu objetivo semanal.`;
+  }
+  return "Mantén el foco en la próxima mejor acción.";
+}
+
 function renderPrimaryAction(state, els) {
   const suggestion = getSuggestedRoutine(state);
   const active = state.session.active;
@@ -43,6 +57,7 @@ function renderPrimaryAction(state, els) {
       <div class="hero-copy">
         <span class="pill">Sesión en curso</span>
         <h2>Continúa tu sesión activa</h2>
+        <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
         <p>Llevas ${workingSets} series efectivas (${warmupSets} warm-up) y ${formatNumber(volume)} kg de volumen efectivo.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
@@ -73,6 +88,7 @@ function renderPrimaryAction(state, els) {
     <div class="hero-copy">
       <span class="pill">Hoy</span>
       <h2>Empieza ${suggestion.routine.name}</h2>
+      <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
       <p>${suggestion.reason} ${lastLabel}.</p>
     </div>
     <div class="hero-actions hero-actions--stack-mobile">
@@ -120,7 +136,7 @@ function renderRecommended(state, els) {
 function renderRecentStory(state, els) {
   const cards = buildRecentActivity(state, 6).map((item) => cardHtml({
     title: item.title,
-    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : item.subtitle}`,
+    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : `Registro manual · ${item.subtitle}`}`,
     chips: item.kind === "session"
       ? [
         { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },

@@ -83,6 +83,7 @@ export function defaultState() {
       logDatePreset: "all",
       sessionManualOpen: false,
       settingsAdvancedOpen: false,
+      logFiltersOpen: false,
       moreSection: "routines"
     },
     meta: {

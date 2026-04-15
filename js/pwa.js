@@ -68,7 +68,11 @@ export function createPwaManager(els, onStatusChange = () => {}) {
   }
 
   function getStatus() {
-    const manifestPresent = Boolean(document.querySelector('link[rel="manifest"]')) && Boolean(document.querySelector('link[rel="icon"]'));
+    const manifestLink = document.querySelector('link[rel="manifest"]');
+    const iconPresent = Boolean(document.querySelector('link[rel="icon"]')) || Boolean(document.querySelector('link[rel="apple-touch-icon"]'));
+    const secure = window.isSecureContext || /localhost|127\.0\.0\.1/.test(window.location.hostname);
+    const canPromptInstall = Boolean(deferredPrompt);
+    const manifestPresent = Boolean(manifestLink) && iconPresent;
     return {
       ios: /iphone|ipad|ipod/i.test(navigator.userAgent),
       standalone: isStandaloneMode(),
@@ -77,7 +81,10 @@ export function createPwaManager(els, onStatusChange = () => {}) {
       controlled: Boolean(navigator.serviceWorker?.controller),
       updateReady: Boolean(registration?.waiting),
       manifestPresent,
-      installAvailable: Boolean(deferredPrompt)
+      installAvailable: canPromptInstall,
+      secureContext: secure,
+      manifestLinkPresent: Boolean(manifestLink),
+      iconPresent
     };
   }
 

@@ -84,6 +84,10 @@ const els = {
   logSourceFilter: document.querySelector("#logSourceFilter"),
   logMuscleFilter: document.querySelector("#logMuscleFilter"),
   logDatePresetFilter: document.querySelector("#logDatePresetFilter"),
+  toggleLogFiltersBtn: document.querySelector("#toggleLogFiltersBtn"),
+  logFiltersPanel: document.querySelector("#logFiltersPanel"),
+  moreLastSection: document.querySelector("#moreLastSection"),
+  moreLastSectionBtn: document.querySelector("#moreLastSectionBtn"),
   measurementForm: document.querySelector("#measurementForm"),
   measurementList: document.querySelector("#measurementList"),
   cancelMeasurementEditBtn: document.querySelector("#cancelMeasurementEditBtn"),
@@ -248,6 +252,19 @@ function bindEvents() {
     renderLogsArea();
     store.queueSave();
   });
+  els.toggleLogFiltersBtn?.addEventListener("click", () => {
+    const open = !els.logFiltersPanel.open;
+    els.logFiltersPanel.open = open;
+    els.toggleLogFiltersBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    store.state.ui.logFiltersOpen = open;
+    store.queueSave();
+  });
+  els.logFiltersPanel?.addEventListener("toggle", () => {
+    const open = els.logFiltersPanel.open;
+    if (els.toggleLogFiltersBtn) els.toggleLogFiltersBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    store.state.ui.logFiltersOpen = open;
+    store.queueSave();
+  });
 
   window.addEventListener("online", updateNetworkStatus);
   window.addEventListener("offline", updateNetworkStatus);
@@ -295,7 +312,15 @@ function handleAction(action, id, trigger) {
       if (["routines", "measurements", "analytics", "goals", "settings"].includes(id)) {
         store.state.ui.moreSection = id;
       }
+      if (id === "more" && ["routines", "measurements", "analytics", "goals", "settings"].includes(store.state.ui.activeTab)) {
+        store.state.ui.moreSection = store.state.ui.activeTab;
+      }
       setActiveTab(store.state, id);
+      if (id === "more") renderMoreArea();
+      store.queueSave();
+      break;
+    case "open-last-more-section":
+      setActiveTab(store.state, store.state.ui.moreSection || "routines");
       store.queueSave();
       break;
     case "load-demo":
@@ -375,6 +400,7 @@ function refreshAll() {
   populateLogFilters();
   renderStats(store.state, els);
   renderDashboardArea();
+  renderMoreArea();
   renderSessionArea();
   renderRoutinesArea();
   renderLogsArea();
@@ -427,8 +453,21 @@ function renderRoutinesArea() {
 function renderLogsArea() {
   populateRoutineSelects();
   populateLogFilters();
+  if (els.logFiltersPanel) els.logFiltersPanel.open = Boolean(store.state.ui.logFiltersOpen);
+  if (els.toggleLogFiltersBtn) els.toggleLogFiltersBtn.setAttribute("aria-expanded", store.state.ui.logFiltersOpen ? "true" : "false");
   renderWorkoutList(store.state, els);
   renderPrList(store.state, els);
+}
+
+function renderMoreArea() {
+  const map = { routines: "Rutinas", measurements: "Medidas", analytics: "Evolución", goals: "Objetivos", settings: "Ajustes" };
+  const section = store.state.ui.moreSection;
+  if (!section || !map[section]) {
+    if (els.moreLastSection) els.moreLastSection.hidden = true;
+    return;
+  }
+  if (els.moreLastSection) els.moreLastSection.hidden = false;
+  if (els.moreLastSectionBtn) els.moreLastSectionBtn.textContent = `Volver a ${map[section]}`;
 }
 
 function renderMeasurementsArea() {
@@ -454,6 +493,7 @@ function refreshWorkoutDependentAreas() {
   populateRoutineSelects();
   populateLogFilters();
   renderDashboardArea();
+  renderMoreArea();
   renderSessionArea();
   renderRoutinesArea();
   renderLogsArea();
@@ -473,6 +513,7 @@ function refreshRoutineDependentAreas() {
   populateRoutineSelects();
   populateLogFilters();
   renderDashboardArea();
+  renderMoreArea();
   renderSessionArea();
   renderRoutinesArea();
   renderLogsArea();
@@ -793,8 +834,18 @@ function saveRoutineFromForm(event) {
     }))
     .filter((item) => item.name);
 
-  if (!form.get("name") || !exercises.length) {
+  const routineName = String(form.get("name") || "").trim();
+  if (!routineName || !exercises.length) {
     toast(els, "Pon nombre a la rutina y al menos un ejercicio.");
+    return;
+  }
+  const invalidExercise = exercises.find((item) => Number(item.sets) <= 0 || !String(item.reps || "").trim());
+  if (invalidExercise) {
+    toast(els, "Revisa la rutina: cada ejercicio necesita series válidas y repeticiones.");
+    return;
+  }
+  const duplicateNames = exercises.map((item) => item.name.toLowerCase()).filter((name, idx, arr) => arr.indexOf(name) !== idx);
+  if (duplicateNames.length && !window.confirm("Hay ejercicios duplicados con el mismo nombre. ¿Quieres guardarla igualmente?")) {
     return;
   }
 
@@ -803,7 +854,7 @@ function saveRoutineFromForm(event) {
   const shouldForkActiveRoutine = editingActiveSessionRoutine;
   const routine = {
     id: shouldForkActiveRoutine ? uid() : (editingRoutineId || uid()),
-    name: String(form.get("name") || "").trim(),
+    name: routineName,
     day: String(form.get("day") || "").trim(),
     focus: String(form.get("focus") || "").trim(),
     notes: String(form.get("notes") || "").trim(),
@@ -819,9 +870,10 @@ function saveRoutineFromForm(event) {
   cancelRoutineEdit();
   store.queueSave();
   refreshRoutineDependentAreas();
+  const complexity = exercises.reduce((sum, item) => sum + Number(item.sets || 0), 0);
   toast(els, shouldForkActiveRoutine
     ? "Había una sesión activa con esta rutina. Se guardó como copia para proteger tu sesión actual."
-    : (index >= 0 ? "Rutina actualizada." : "Rutina guardada."));
+    : (index >= 0 ? `Rutina actualizada · ${complexity} series planificadas.` : `Rutina guardada · ${complexity} series planificadas.`));
 }
 
 function addExerciseRow(data = {}, afterRow = null) {
@@ -1136,6 +1188,7 @@ function savePreferences(event) {
   store.state.preferences.enableVibration = els.preferencesForm.enableVibration.checked;
   store.state.preferences.collapseManualLog = els.preferencesForm.collapseManualLog.checked;
   if (!store.state.preferences.keepScreenAwake) releaseWakeLock();
+  else if (store.state.session.active) requestWakeLock();
   store.queueSave();
   renderSessionArea();
   renderLogsArea();
@@ -1184,6 +1237,7 @@ function updateRestTimerLabel() {
   const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
   const seconds = String(remaining % 60).padStart(2, '0');
   els.restTimerLabel.textContent = `${minutes}:${seconds}`;
+  els.restTimerLabel.closest('.rest-timer')?.classList.toggle('active', remaining > 0);
 }
 
 function getRestRemainingSeconds() {
@@ -1212,7 +1266,20 @@ function startTickers() {
   }, 1000);
 }
 
-function loadDemoData() {
+async function confirmSafeStateReplacement(actionLabel) {
+  const risky = hasActiveSessionRisk(store.state);
+  if (!risky) return true;
+  const message = `Hay una sesión activa con series o notas temporales. Si continúas con "${actionLabel}", perderás esa sesión en progreso. ¿Quieres continuar?`;
+  const accepted = window.confirm(message);
+  if (!accepted) {
+    toast(els, "Acción cancelada para proteger la sesión activa.");
+    return false;
+  }
+  return true;
+}
+
+async function loadDemoData() {
+  if (!await confirmSafeStateReplacement("Cargar demo")) return;
   if ((store.state.workouts.length || store.state.measurements.length || store.state.sessionHistory.length) && !window.confirm('Ya hay datos. ¿Quieres reemplazarlos con la demo?')) {
     return;
   }
@@ -1317,7 +1384,8 @@ function measurementDemo(date, bodyWeight, bodyFat, waist, chest, arm, thigh, hi
   return { id: uid(), date, bodyWeight, bodyFat, waist, chest, arm, thigh, hips, neck, sleepHours, notes: 'Demo', createdAt, updatedAt: createdAt };
 }
 
-function resetAllData() {
+async function resetAllData() {
+  if (!await confirmSafeStateReplacement("Resetear todos los datos")) return;
   if (!window.confirm('¿Seguro que quieres borrar todos los datos?')) return;
   releaseWakeLock();
   stopRestTimer();
@@ -1345,9 +1413,13 @@ function exportCsv() {
   downloadBlob(new Blob([sessionsCsv], { type: 'text/csv;charset=utf-8' }), `gymflow-sessions-${todayLocal()}.csv`);
 }
 
-function importJson(event) {
+async function importJson(event) {
   const file = event.target.files?.[0];
   if (!file) return;
+  if (!await confirmSafeStateReplacement("Importar JSON")) {
+    event.target.value = "";
+    return;
+  }
   const reader = new FileReader();
   reader.onload = async () => {
     try {

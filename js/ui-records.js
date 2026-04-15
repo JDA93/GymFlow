@@ -82,8 +82,9 @@ function renderSessionHistoryCard(item) {
         `).join("")}
       </div>
       <div class="actions-row">
+        <button class="ghost small" data-action="start-routine" data-id="${item.routineId}">Repetir hoy</button>
         <button class="ghost small" data-action="edit-session-history" data-id="${item.sessionId}">Corregir series</button>
-        <button class="ghost small" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
+        <button class="ghost small danger-ghost" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
       </div>
     </article>
   `;
@@ -107,7 +108,7 @@ function renderManualHistoryCard(item) {
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
-        <button class="ghost small" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
+        <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
       </div>
     </article>
   `;
@@ -143,9 +144,9 @@ export function renderMeasurements(state, els) {
         <span class="chip ghost">Sueño ${item.sleepHours !== "" && item.sleepHours != null ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
       </div>
       <div class="chip-row">
-        <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : formatCompactDelta(item.deltaBodyWeight, " kg")}</span>
-        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : formatCompactDelta(item.deltaWaist, " cm")}</span>
-        <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : formatCompactDelta(item.deltaBodyFat, " %")}</span>
+        <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : `${item.deltaBodyWeight < 0 ? "↘ " : item.deltaBodyWeight > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyWeight, " kg")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : `${item.deltaWaist < 0 ? "↘ " : item.deltaWaist > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaWaist, " cm")}`}</span>
+        <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : `${item.deltaBodyFat < 0 ? "↘ " : item.deltaBodyFat > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyFat, " %")}`}</span>
         <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
         <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
         <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
