@@ -268,6 +268,8 @@ function bindEvents() {
 
   window.addEventListener("online", updateNetworkStatus);
   window.addEventListener("offline", updateNetworkStatus);
+  window.addEventListener("resize", syncToastOffsetFromBottomNav);
+  window.addEventListener("orientationchange", syncToastOffsetFromBottomNav);
   window.addEventListener("pagehide", () => {
     releaseWakeLock();
     store.flushSave().catch(() => {});
@@ -395,6 +397,7 @@ function handleAction(action, id, trigger) {
 }
 
 function refreshAll() {
+  syncToastOffsetFromBottomNav();
   refreshExerciseOptions();
   populateRoutineSelects();
   populateLogFilters();
@@ -1218,6 +1221,18 @@ function releaseWakeLock() {
   }
 }
 
+function prepareForFullStateReplacement() {
+  releaseWakeLock();
+  stopRestTimer();
+}
+
+function syncToastOffsetFromBottomNav() {
+  const tabbar = document.querySelector(".tabbar");
+  const isMobile = window.matchMedia?.("(max-width: 760px)")?.matches;
+  const reserved = isMobile ? Math.ceil(tabbar?.getBoundingClientRect?.().height || 0) + 16 : 0;
+  els.toastRegion?.style.setProperty("--tabbar-reserved", `${reserved}px`);
+}
+
 function startRestTimer(seconds) {
   const total = Number(seconds || 0);
   if (total <= 0) return;
@@ -1344,8 +1359,7 @@ async function loadDemoData() {
     resultGoals: { bodyWeight: 79, waist: 80, bodyFat: 12, bench: 100, squat: 140, deadlift: 160 },
     habits: { workoutsPerWeek: 4, sleepHours: 7.5, measureEveryDays: 14, minimumStreakDays: 3 }
   };
-  releaseWakeLock();
-  stopRestTimer();
+  prepareForFullStateReplacement();
   store.state = newState;
   ensureMinimumData();
   syncAllSessionHistory(store.state);
@@ -1387,8 +1401,7 @@ function measurementDemo(date, bodyWeight, bodyFat, waist, chest, arm, thigh, hi
 async function resetAllData() {
   if (!await confirmSafeStateReplacement("Resetear todos los datos")) return;
   if (!window.confirm('¿Seguro que quieres borrar todos los datos?')) return;
-  releaseWakeLock();
-  stopRestTimer();
+  prepareForFullStateReplacement();
   store.state = defaultState();
   ensureMinimumData();
   cancelRoutineEdit();
@@ -1423,6 +1436,7 @@ async function importJson(event) {
   const reader = new FileReader();
   reader.onload = async () => {
     try {
+      prepareForFullStateReplacement();
       store.state = migrateState(JSON.parse(String(reader.result)));
       ensureMinimumData();
       syncAllSessionHistory(store.state);

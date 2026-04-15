@@ -63,6 +63,18 @@ button.ghost {
   border: 1px solid var(--border);
   box-shadow: none;
 }
+.topbar button.ghost {
+  color: rgba(255,255,255,.96);
+  border-color: rgba(255,255,255,.38);
+  background: rgba(255,255,255,.08);
+}
+.topbar button.ghost:hover {
+  background: rgba(255,255,255,.16);
+  border-color: rgba(255,255,255,.5);
+}
+.topbar button.ghost:focus-visible {
+  box-shadow: 0 0 0 4px rgba(255,255,255,.18);
+}
 button.danger-ghost {
   color: #b42318;
   border-color: #f5b3ad;
@@ -619,7 +631,6 @@ dialog::backdrop { background: rgba(15, 23, 42, .45); }
 @media (max-width: 760px) {
   .topbar { padding: .85rem; border-radius: 20px; }
   .hero-card { padding: 1rem; }
-  .toast-region { --tabbar-reserved: 86px; }
   .session-series-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .session-series-grid > button { grid-column: span 2; }
   .more-grid--cards { grid-template-columns: 1fr; }
