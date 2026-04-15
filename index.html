@@ -25,12 +25,9 @@
           <p class="subtitle">Rápida para entrenar, robusta para guardar y clara para decidir qué toca hoy.</p>
         </div>
 
-        <div class="topbar-actions">
-          <span id="networkBadge" class="status-badge" aria-live="polite">Online</span>
+        <div class="topbar-actions topbar-actions--compact">
           <span id="saveStatusBadge" class="status-badge status-badge--save" data-state="saved" aria-live="polite">Guardado</span>
-          <button id="installBtn" class="ghost" hidden>Instalar app</button>
-          <button id="iosInstallBtn" class="ghost" hidden>Cómo instalar en iPhone</button>
-          <button id="loadDemoBtn" class="ghost">Cargar demo</button>
+          <span id="networkBadge" class="status-badge" aria-live="polite">Online</span>
         </div>
       </header>
 
@@ -87,8 +84,8 @@
             <article class="card card--emphasis">
               <div class="card-head">
                 <div>
-                  <h2>Rutina recomendada</h2>
-                  <p>La decisión rápida para arrancar hoy.</p>
+                  <h2>Lanzador rápido</h2>
+                  <p>Acciones inmediatas para entrenar, medir o retomar sin pensar.</p>
                 </div>
               </div>
               <div id="recommendedRoutine" class="list compact"></div>
@@ -361,6 +358,14 @@
                     <h3>Ejercicios</h3>
                     <button type="button" id="addExerciseRowBtn" class="ghost small">Añadir ejercicio</button>
                   </div>
+                  <div class="template-row" aria-label="Plantillas rápidas">
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="push">Push</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="pull">Pull</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="legs">Legs</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="upper">Upper</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="lower">Lower</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="full">Full Body</button>
+                  </div>
                   <div id="exerciseRows"></div>
                 </div>
                 <div class="session-actions-row">
@@ -439,6 +444,7 @@
                   </div>
                 </div>
               </details>
+              <p id="logFilterSummary" class="helper-line log-filter-summary"></p>
               <div id="workoutList" class="list"></div>
             </article>
 
@@ -780,6 +786,11 @@
               </div>
               <div class="settings-actions-block">
                 <p class="helper-line">Tus datos se guardan localmente en este dispositivo (IndexedDB con respaldo local). Exporta copias periódicas para máxima tranquilidad.</p>
+                <div class="actions-row settings-actions-row">
+                  <button id="installBtn" class="ghost" hidden type="button">Instalar app</button>
+                  <button id="iosInstallBtn" class="ghost" hidden type="button">Cómo instalar en iPhone</button>
+                  <button id="loadDemoBtn" class="ghost" type="button">Cargar demo</button>
+                </div>
                 <div class="actions-row settings-actions-row">
                   <button id="exportBtn" class="ghost" type="button">Exportar JSON</button>
                   <button id="exportCsvBtn" class="ghost" type="button">Exportar CSV</button>

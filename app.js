@@ -76,6 +76,7 @@ const els = {
   exerciseRowTemplate: document.querySelector("#exerciseRowTemplate"),
   routineList: document.querySelector("#routineList"),
   cancelRoutineEditBtn: document.querySelector("#cancelRoutineEditBtn"),
+  logFilterSummary: document.querySelector("#logFilterSummary"),
   workoutList: document.querySelector("#workoutList"),
   prList: document.querySelector("#prList"),
   logSearchInput: document.querySelector("#logSearchInput"),
@@ -343,6 +344,9 @@ function handleAction(action, id, trigger) {
     case "delete-routine":
       deleteRoutine(id);
       break;
+    case "apply-routine-template":
+      applyRoutineTemplate(id);
+      break;
     case "edit-history-group":
       openHistoryGroupEditor(id);
       break;
@@ -375,6 +379,9 @@ function handleAction(action, id, trigger) {
       break;
     case "repeat-last-session-set":
       repeatLastSessionSet(id);
+      break;
+    case "save-last-session-set-again":
+      saveLastSessionSetAgain(id);
       break;
     case "remove-routine-row":
       trigger.closest(".exercise-row")?.remove();
@@ -639,7 +646,7 @@ function handleDiscardSession(force = false) {
 }
 
 function handleCopyLastSession() {
-  const result = copyLastSessionIntoActive(store.state);
+  const result = copyLastSessionIntoActive(store.state, window.confirm);
   if (!result.ok) {
     toast(els, result.message);
     return;
@@ -745,6 +752,31 @@ function repeatLastSessionSet(exerciseId) {
   document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = last.rest || store.state.preferences.defaultRestSeconds;
   document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`).value = last.rpe === "" ? "" : last.rpe;
   toast(els, "Se han copiado los valores de la última serie.");
+}
+
+function saveLastSessionSetAgain(exerciseId) {
+  const last = getSessionEntriesByExercise(store.state, exerciseId).slice(-1)[0];
+  if (!last) {
+    toast(els, "No hay una serie previa para duplicar.");
+    return;
+  }
+  const result = addSessionSet(store.state, exerciseId, {
+    weight: Number(last.weight),
+    reps: Number(last.reps),
+    rpe: last.rpe,
+    rest: Number(last.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+    isWarmup: Boolean(last.isWarmup)
+  });
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  renderAnalyticsArea();
+  toast(els, "Serie duplicada y guardada.");
+  if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
 }
 
 function saveWorkoutFromForm(event) {
@@ -940,6 +972,57 @@ function cancelRoutineEdit() {
   els.routineForm.reset();
   els.exerciseRows.innerHTML = "";
   addExerciseRow();
+}
+
+function applyRoutineTemplate(templateId) {
+  const templates = {
+    push: { name: 'Push', focus: 'Pecho, hombro, tríceps', exercises: [
+      { block: 'A', name: 'Press banca', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'B', name: 'Press inclinado mancuernas', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'C', name: 'Press militar', sets: 3, reps: '6-10', rest: 90 },
+      { block: 'D', name: 'Extensión de tríceps polea', sets: 3, reps: '10-15', rest: 60 }
+    ]},
+    pull: { name: 'Pull', focus: 'Espalda y bíceps', exercises: [
+      { block: 'A', name: 'Dominadas', sets: 4, reps: '6-10', rest: 120 },
+      { block: 'B', name: 'Remo con barra', sets: 4, reps: '6-10', rest: 90 },
+      { block: 'C', name: 'Jalón al pecho', sets: 3, reps: '10-12', rest: 75 },
+      { block: 'D', name: 'Curl bíceps mancuernas', sets: 3, reps: '10-12', rest: 60 }
+    ]},
+    legs: { name: 'Legs', focus: 'Pierna completa', exercises: [
+      { block: 'A', name: 'Sentadilla', sets: 4, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Peso muerto rumano', sets: 3, reps: '8-10', rest: 120 },
+      { block: 'C', name: 'Prensa', sets: 3, reps: '10-12', rest: 90 },
+      { block: 'D', name: 'Curl femoral', sets: 3, reps: '10-15', rest: 75 }
+    ]},
+    upper: { name: 'Upper', focus: 'Torso equilibrado', exercises: [
+      { block: 'A1', name: 'Press banca', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'A2', name: 'Remo con barra', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'B1', name: 'Press militar', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'B2', name: 'Jalón al pecho', sets: 3, reps: '8-12', rest: 90 }
+    ]},
+    lower: { name: 'Lower', focus: 'Pierna y core', exercises: [
+      { block: 'A', name: 'Sentadilla frontal', sets: 4, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Zancadas', sets: 3, reps: '10-12', rest: 90 },
+      { block: 'C', name: 'Hip thrust', sets: 4, reps: '8-12', rest: 90 },
+      { block: 'D', name: 'Plancha', sets: 3, reps: '30-45', rest: 45 }
+    ]},
+    full: { name: 'Full Body', focus: 'Compuestos base', exercises: [
+      { block: 'A', name: 'Sentadilla', sets: 3, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Press banca', sets: 3, reps: '6-10', rest: 120 },
+      { block: 'C', name: 'Remo con barra', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'D', name: 'Peso muerto rumano', sets: 3, reps: '8-10', rest: 120 }
+    ]}
+  };
+  const template = templates[templateId];
+  if (!template) return;
+  if (els.exerciseRows.querySelector('.exercise-row [data-field="name"]')?.value.trim() && !window.confirm('Se reemplazarán los ejercicios del formulario actual. ¿Continuar?')) {
+    return;
+  }
+  els.exerciseRows.innerHTML = '';
+  template.exercises.forEach((exercise) => addExerciseRow(exercise));
+  if (!els.routineForm.name.value.trim()) els.routineForm.name.value = template.name;
+  if (!els.routineForm.focus.value.trim()) els.routineForm.focus.value = template.focus;
+  toast(els, `Plantilla ${template.name} aplicada.`);
 }
 
 function duplicateRoutine(id) {
@@ -1203,7 +1286,10 @@ function updateNetworkStatus() {
   const online = navigator.onLine;
   els.networkBadge.textContent = online ? 'Online' : 'Offline';
   els.networkBadge.classList.toggle('offline', !online);
+  els.networkBadge.dataset.online = online ? 'true' : 'false';
+  els.networkBadge.dataset.quiet = online ? 'true' : 'false';
 }
+
 
 async function requestWakeLock() {
   try {
