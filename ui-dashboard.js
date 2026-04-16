@@ -7,7 +7,7 @@ import {
   computeStats,
   detectPotentialStall,
   getSuggestedRoutine
-} from "./analytics.js";
+} from "./analytics-core.js";
 import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
 import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
@@ -53,18 +53,16 @@ function renderPrimaryAction(state, els) {
     const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
     const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
     const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
-    const nextExercise = routine?.exercises?.find((exercise) => !state.session.completedExerciseIds.includes(exercise.id) && !(state.session.skippedExerciseIds || []).includes(exercise.id)) || routine?.exercises?.[0] || null;
     els.dashboardPrimaryCard.innerHTML = `
       <div class="hero-copy">
-        <span class="pill">Sesión activa</span>
-        <h2>Continúa ${routine?.name || "tu entrenamiento"}</h2>
-        <p class="today-insight">${nextExercise ? `Toca seguir con ${nextExercise.name}.` : buildTodayInsight(state, suggestion)}</p>
+        <span class="pill">En curso</span>
+        <h2>Vuelve a tu sesión activa</h2>
+        <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
         <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
       </div>
       <div class="hero-actions hero-actions--stack-mobile">
         <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
-        <button class="ghost" data-action="open-tab" data-id="routines">Elegir otra rutina</button>
+        <button class="ghost" data-action="open-tab" data-id="session">Abrir flujo de sesión</button>
       </div>
     `;
     return;
@@ -104,12 +102,11 @@ function renderLauncher(state, els) {
   const suggestion = getSuggestedRoutine(state);
   const cards = [];
   if (state.session.active) {
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
     cards.push(cardHtml({
-      title: "Continuar sesión",
-      subtitle: routine ? `Rutina activa: ${routine.name}.` : "Retoma exactamente donde te quedaste.",
+      title: "Continuar sesión activa",
+      subtitle: "Retoma exactamente donde te quedaste.",
       chips: [{ label: "Prioridad alta", type: "success" }],
-      footer: `<button data-action="continue-session">Abrir sesión</button>`
+      footer: `<button data-action="continue-session">Ir a sesión</button>`
     }));
   } else if (suggestion.routine) {
     cards.push(cardHtml({

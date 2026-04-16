@@ -173,13 +173,6 @@ export function normalizeNameForMatch(value) {
     .replace(/\s+/g, " ");
 }
 
-
-export function includesNormalized(haystack, needle) {
-  const normalizedNeedle = normalizeNameForMatch(needle);
-  if (!normalizedNeedle) return true;
-  return normalizeNameForMatch(haystack).includes(normalizedNeedle);
-}
-
 export function safeClone(value) {
   if (typeof structuredClone === "function") {
     try {

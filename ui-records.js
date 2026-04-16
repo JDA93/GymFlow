@@ -1,29 +1,21 @@
-import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics.js";
+import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics-core.js";
 import { cardHtml, emptyHtml } from "./ui-common.js";
-import { formatCompactDelta, formatDate, formatDuration, formatNumber, normalizeNameForMatch, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
+import { formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
 
 export function renderRoutines(state, els) {
-  const search = normalizeNameForMatch(String(state.ui.routineSearch || ""));
+  const search = String(state.ui.routineSearch || "").trim().toLowerCase();
   const dayFilter = state.ui.routineDayFilter || "all";
-  const activeRoutineId = state.session.active ? state.session.routineId : "";
-
   const routines = state.routines.filter((routine) => {
     const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
     if (!dayMatches) return false;
     if (!search) return true;
-    const haystack = [
-      routine.name,
-      routine.day,
-      routine.focus,
-      routine.notes,
-      ...(routine.exercises || []).flatMap((item) => [item.name, item.block, item.notes, item.muscleGroup])
-    ].filter(Boolean).join(" ");
-    return normalizeNameForMatch(haystack).includes(search);
+    const haystack = [routine.name, routine.day, routine.focus, ...(routine.exercises || []).map((item) => item.name)].join(" ").toLowerCase();
+    return haystack.includes(search);
   });
 
   if (els.routineFilterSummary) {
     const bits = [];
-    if (search) bits.push(`búsqueda "${String(state.ui.routineSearch || "").trim()}"`);
+    if (search) bits.push(`búsqueda "${search}"`);
     if (dayFilter !== "all") bits.push(`bloque ${dayFilter}`);
     els.routineFilterSummary.textContent = bits.length
       ? `${routines.length} rutinas visibles · filtros: ${bits.join(" · ")}.`
@@ -39,16 +31,14 @@ export function renderRoutines(state, els) {
     const meta = buildRoutineMetadata(state, routine);
     const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
     const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
-    const isActive = activeRoutineId === routine.id;
-    const lastUsedLabel = meta.lastDate ? `${formatDate(meta.lastDate)} · ${relativeDaysLabel(daysBetween(meta.lastDate, todayLocal()))}` : "Aún sin usar";
     return `
-      <article class="list-item routine-card ${isActive ? "routine-card--active" : ""}">
+      <article class="list-item routine-card">
         <div class="list-head">
           <div>
             <h3 class="list-title">${routine.name}</h3>
             <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
           </div>
-          <span class="chip ${isActive ? "success" : "ghost"}">${isActive ? "Sesión activa" : lastUsedLabel}</span>
+          <span class="chip ghost">${meta.lastDate ? `Último ${formatDate(meta.lastDate)}` : "Aún sin usar"}</span>
         </div>
         <div class="chip-row">
           <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
@@ -68,10 +58,10 @@ export function renderRoutines(state, els) {
           ${routine.exercises.length > 5 ? `<p class="helper-line">+${routine.exercises.length - 5} ejercicios más</p>` : ""}
         </div>
         <div class="actions-row">
-          <button data-action="start-routine" data-id="${routine.id}">${isActive ? "Continuar sesión" : "Iniciar sesión"}</button>
+          <button data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
           <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
           <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
-          <button class="ghost small danger-ghost" data-action="delete-routine" data-id="${routine.id}">Eliminar</button>
+          <button class="ghost small" data-action="delete-routine" data-id="${routine.id}">Borrar</button>
         </div>
       </article>
     `;
