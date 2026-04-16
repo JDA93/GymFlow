@@ -143,7 +143,8 @@ export function addSessionSet(state, exerciseId, payload) {
 
   const weight = Number(payload.weight);
   const reps = Number(payload.reps);
-  const rest = safeNumber(payload.rest || exercise.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS);
+  // Nota: `0` es un descanso válido, por eso evitamos usar `||` aquí.
+  const rest = safeNumber(payload.rest ?? exercise.rest ?? state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS);
   const isWarmup = Boolean(payload.isWarmup);
 
   if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
@@ -206,7 +207,8 @@ export function updateSessionSet(state, entryId, payload) {
     reps,
     rpe,
     isWarmup: Boolean(payload.isWarmup),
-    rest: safeNumber(payload.rest || current.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS),
+    // Nota: `0` es un descanso válido, por eso evitamos usar `||` aquí.
+    rest: safeNumber(payload.rest ?? current.rest ?? state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS),
     updatedAt: new Date().toISOString()
   };
   recomputeCompletedExercises(state);

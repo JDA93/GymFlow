@@ -1,4 +1,4 @@
-const CACHE_NAME = "gymflow-pro-cache-v8-fixed-2";
+const CACHE_NAME = "gymflow-pro-cache-v9-offline-robust";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -19,11 +19,32 @@ const CORE_ASSETS = [
   "./icons/icon-192.png",
   "./icons/icon-512.png"
 ];
+const OFFLINE_FALLBACK_URL = "./index.html";
+
+function canCacheResponse(response) {
+  if (!response) return false;
+  if (!response.ok) return false;
+  if (response.status === 206) return false;
+  return response.type === "basic" || response.type === "cors";
+}
+
+async function safePrecache() {
+  const cache = await caches.open(CACHE_NAME);
+  await Promise.allSettled(
+    CORE_ASSETS.map(async (assetUrl) => {
+      try {
+        const response = await fetch(assetUrl, { cache: "no-cache" });
+        if (!canCacheResponse(response)) return;
+        await cache.put(assetUrl, response.clone());
+      } catch (error) {
+        // Instalación defensiva: un fallo puntual no debería romper todo el SW.
+      }
+    })
+  );
+}
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
-  );
+  event.waitUntil(safePrecache().then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {
@@ -49,26 +70,31 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy)).catch(() => {});
+          if (canCacheResponse(response)) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(OFFLINE_FALLBACK_URL, copy)).catch(() => {});
+          }
           return response;
         })
-        .catch(() => caches.match("./index.html"))
+        .catch(async () => (await caches.match(request)) || caches.match(OFFLINE_FALLBACK_URL))
     );
     return;
   }
 
   event.respondWith(
     caches.match(request).then((cached) => {
-      const networkFetch = fetch(request)
-        .then((response) => {
+      const networkFetch = fetch(request).then((response) => {
+        if (canCacheResponse(response)) {
           const copy = response.clone();
           caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
-          return response;
-        })
-        .catch(() => cached);
-
-      return cached || networkFetch;
+        }
+        return response;
+      });
+      if (cached) {
+        event.waitUntil(networkFetch.catch(() => {}));
+        return cached;
+      }
+      return networkFetch.catch(() => cached);
     })
   );
 });

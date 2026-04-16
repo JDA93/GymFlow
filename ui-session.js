@@ -64,8 +64,8 @@ export function renderSession(state, els) {
         <p class="helper-line">Siguiente sugerencia: ${currentSuggestion ? `${formatNumber(currentSuggestion.value)} kg` : "—"} · ${pendingCount} pendientes</p>
       </div>
       <div class="actions-row">
-        <button class="ghost small" data-action="focus-current-exercise" data-id="${nextExerciseId || ""}">Ir al ejercicio</button>
-        <button class="ghost small" data-action="jump-next-exercise" data-id="${nextExerciseId || ""}">Saltar al siguiente pendiente</button>
+        <button class="ghost small" data-action="focus-current-exercise" data-id="${escapeHtml(nextExerciseId || "")}">Ir al ejercicio</button>
+        <button class="ghost small" data-action="jump-next-exercise" data-id="${escapeHtml(nextExerciseId || "")}">Saltar al siguiente pendiente</button>
       </div>
     </div>
   `;
@@ -81,7 +81,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
   const status = getExerciseCompletionStatus(state, exercise);
   const suggestion = nextLoadSuggestionForExercise(state, exercise);
   const repRange = parseRepRange(exercise.reps);
-  const restDefault = exercise.rest || state.preferences.defaultRestSeconds;
+  const restDefault = exercise.rest ?? state.preferences.defaultRestSeconds;
   const latestEntry = entries[entries.length - 1] || null;
   const suggestedWeight = latestEntry ? latestEntry.weight : (reference?.weight ?? suggestion.value ?? 0);
   const suggestedReps = latestEntry ? latestEntry.reps : extractMainRep(exercise.reps);
@@ -99,9 +99,10 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
       <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : isNext ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado" : isNext ? "Ahora toca" : "Pendiente"}</span>
     </summary>
   `;
+  const safeExerciseId = escapeHtml(exercise.id);
 
   return `
-    <details class="session-exercise ${stateClass}" id="exercise-card-${exercise.id}" ${shouldExpand ? "open" : ""}>
+    <details class="session-exercise ${stateClass}" id="exercise-card-${safeExerciseId}" ${shouldExpand ? "open" : ""}>
       ${summary}
       <div class="session-exercise-body">
       <div class="session-exercise-top">
@@ -113,7 +114,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
           <p class="list-subtitle">${exercise.sets || "—"} series objetivo · ${escapeHtml(String(exercise.reps || "—"))} reps · descanso ${restDefault}s</p>
         </div>
         <div class="actions-row actions-row--tight">
-          <button class="ghost small" data-action="toggle-skip-exercise" data-id="${exercise.id}">${status.skipped ? "Reactivar" : "Omitir"}</button>
+          <button class="ghost small" data-action="toggle-skip-exercise" data-id="${safeExerciseId}">${status.skipped ? "Reactivar" : "Omitir"}</button>
         </div>
       </div>
 
@@ -134,32 +135,32 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
 
       <div class="session-series-grid">
         <div class="quick-input-group">
-          <label for="session-weight-${exercise.id}">Kg</label>
-          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${exercise.id}" value="${suggestedWeight}" />
+          <label for="session-weight-${safeExerciseId}">Kg</label>
+          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${safeExerciseId}" value="${suggestedWeight}" />
         </div>
         <div class="quick-input-group">
-          <label for="session-reps-${exercise.id}">Reps</label>
-          <input inputmode="numeric" type="number" step="1" min="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${suggestedReps}" />
+          <label for="session-reps-${safeExerciseId}">Reps</label>
+          <input inputmode="numeric" type="number" step="1" min="1" placeholder="Reps" id="session-reps-${safeExerciseId}" value="${suggestedReps}" />
         </div>
         <div class="quick-input-group quick-input-group--small">
-          <label for="session-rpe-${exercise.id}">RPE</label>
-          <input inputmode="decimal" type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${exercise.id}" value="" />
+          <label for="session-rpe-${safeExerciseId}">RPE</label>
+          <input inputmode="decimal" type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${safeExerciseId}" value="" />
         </div>
         <div class="quick-input-group quick-input-group--small">
-          <label for="session-rest-${exercise.id}">Descanso</label>
-          <input inputmode="numeric" type="number" min="0" step="15" placeholder="Segundos" id="session-rest-${exercise.id}" value="${suggestedRest}" />
+          <label for="session-rest-${safeExerciseId}">Descanso</label>
+          <input inputmode="numeric" type="number" min="0" step="15" placeholder="Segundos" id="session-rest-${safeExerciseId}" value="${suggestedRest}" />
         </div>
         <label class="switch-row compact-switch quick-switch">
-          <input type="checkbox" id="session-warmup-${exercise.id}" />
+          <input type="checkbox" id="session-warmup-${safeExerciseId}" />
           <span>Warm-up</span>
         </label>
-        <button data-action="add-session-set" data-id="${exercise.id}" ${status.skipped ? "disabled" : ""}>Guardar serie</button>
+        <button data-action="add-session-set" data-id="${safeExerciseId}" ${status.skipped ? "disabled" : ""}>Guardar serie</button>
       </div>
 
       <div class="session-quick-actions">
-        <button class="ghost small" data-action="fill-last-session-values" data-id="${exercise.id}" ${reference ? "" : "disabled"}>Usar última referencia</button>
-        <button class="ghost small" data-action="repeat-last-session-set" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Rellenar última serie</button>
-        <button class="ghost small" data-action="save-last-session-set-again" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Guardar misma serie otra vez</button>
+        <button class="ghost small" data-action="fill-last-session-values" data-id="${safeExerciseId}" ${reference ? "" : "disabled"}>Usar última referencia</button>
+        <button class="ghost small" data-action="repeat-last-session-set" data-id="${safeExerciseId}" ${latestEntry ? "" : "disabled"}>Rellenar última serie</button>
+        <button class="ghost small" data-action="save-last-session-set-again" data-id="${safeExerciseId}" ${latestEntry ? "" : "disabled"}>Guardar misma serie otra vez</button>
       </div>
 
       ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}
@@ -191,11 +192,11 @@ function buildSessionTable(entries) {
               <td>${formatNumber(entry.weight)} kg</td>
               <td>${entry.reps}</td>
               <td>${entry.rpe === "" ? "—" : entry.rpe}</td>
-              <td>${entry.rest || "—"}s</td>
+              <td>${entry.rest ?? "—"}s</td>
               <td class="session-row-actions">
-                <button class="ghost small" data-action="prefill-session-set" data-id="${entry.id}">Cargar</button>
-                <button class="ghost small" data-action="edit-session-set" data-id="${entry.id}">Editar</button>
-                <button class="ghost small" data-action="delete-session-set" data-id="${entry.id}">Quitar</button>
+                <button class="ghost small" data-action="prefill-session-set" data-id="${escapeHtml(entry.id)}">Cargar</button>
+                <button class="ghost small" data-action="edit-session-set" data-id="${escapeHtml(entry.id)}">Editar</button>
+                <button class="ghost small" data-action="delete-session-set" data-id="${escapeHtml(entry.id)}">Quitar</button>
               </td>
             </tr>
           `).join("")}

@@ -1,6 +1,6 @@
 import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics-core.js";
 import { cardHtml, emptyHtml } from "./ui-common.js";
-import { formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
+import { escapeHtml, formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
 
 export function renderRoutines(state, els) {
   const search = String(state.ui.routineSearch || "").trim().toLowerCase();
@@ -35,8 +35,8 @@ export function renderRoutines(state, els) {
       <article class="list-item routine-card">
         <div class="list-head">
           <div>
-            <h3 class="list-title">${routine.name}</h3>
-            <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
+            <h3 class="list-title">${escapeHtml(routine.name)}</h3>
+            <p class="list-subtitle">${escapeHtml(routine.day || "Sin bloque")} · ${escapeHtml(routine.focus || "Sin foco")}</p>
           </div>
           <span class="chip ghost">${meta.lastDate ? `Último ${formatDate(meta.lastDate)}` : "Aún sin usar"}</span>
         </div>
@@ -46,22 +46,22 @@ export function renderRoutines(state, els) {
           <span class="chip ghost">~${estimatedMinutes} min</span>
           <span class="chip ${meta.complexityScore >= 24 ? "warning" : meta.complexityScore >= 16 ? "success" : "ghost"}">${meta.complexityLabel}</span>
           ${meta.blockCount ? `<span class="chip ghost">${meta.blockCount} bloques</span>` : ""}
-          ${blockPreview.map((block) => `<span class="chip ghost">${block}</span>`).join("")}
+          ${blockPreview.map((block) => `<span class="chip ghost">${escapeHtml(block)}</span>`).join("")}
         </div>
         <div class="routine-preview-list">
           ${(routine.exercises || []).slice(0, 5).map((exercise) => `
             <div class="routine-preview-row">
-              <strong>${exercise.block ? `${exercise.block} · ` : ""}${exercise.name}</strong>
+              <strong>${escapeHtml(exercise.block ? `${exercise.block} · ` : "")}${escapeHtml(exercise.name)}</strong>
               <span>${exercise.sets}×${exercise.reps} · ${exercise.rest}s</span>
             </div>
           `).join("")}
           ${routine.exercises.length > 5 ? `<p class="helper-line">+${routine.exercises.length - 5} ejercicios más</p>` : ""}
         </div>
         <div class="actions-row">
-          <button data-action="start-routine" data-id="${routine.id}">Iniciar sesión</button>
-          <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
-          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
-          <button class="ghost small" data-action="delete-routine" data-id="${routine.id}">Borrar</button>
+          <button data-action="start-routine" data-id="${escapeHtml(routine.id)}">Iniciar sesión</button>
+          <button class="ghost small" data-action="edit-routine" data-id="${escapeHtml(routine.id)}">Editar</button>
+          <button class="ghost small" data-action="duplicate-routine" data-id="${escapeHtml(routine.id)}">Duplicar</button>
+          <button class="ghost small" data-action="delete-routine" data-id="${escapeHtml(routine.id)}">Borrar</button>
         </div>
       </article>
     `;
@@ -102,7 +102,7 @@ function renderSessionHistoryCard(item) {
     <article class="list-item history-card history-card--session">
       <div class="list-head">
         <div>
-          <h3 class="list-title">${item.title}</h3>
+          <h3 class="list-title">${escapeHtml(item.title)}</h3>
           <p class="list-subtitle">Sesión completa · ${item.exercisesCompleted} ejercicios · ${formatDuration(item.durationSeconds || 0)}</p>
         </div>
         <span class="chip success">${formatNumber(item.volume)} kg</span>
@@ -111,21 +111,21 @@ function renderSessionHistoryCard(item) {
         <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
         <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
         <span class="chip ghost">${item.exercisesCompleted ?? 0} ejercicios</span>
-        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
+        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${escapeHtml(group)}</span>`).join("")}
       </div>
-      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${escapeHtml(item.notes)}</p>` : ""}
       <div class="history-session-exercises">
         ${item.exercises.slice(0, 4).map((exercise) => `
           <div class="history-mini-row">
-            <strong>${exercise.exercise}</strong>
+            <strong>${escapeHtml(exercise.exercise)}</strong>
             <span>${exercise.setCount} series · ${formatNumber(exercise.maxWeight)} kg top</span>
           </div>
         `).join("")}
       </div>
       <div class="actions-row">
-        <button class="ghost small" data-action="start-routine" data-id="${item.routineId}">Repetir hoy</button>
-        <button class="ghost small" data-action="edit-session-history" data-id="${item.sessionId}">Corregir series</button>
-        <button class="ghost small danger-ghost" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
+        <button class="ghost small" data-action="start-routine" data-id="${escapeHtml(item.routineId)}">Repetir hoy</button>
+        <button class="ghost small" data-action="edit-session-history" data-id="${escapeHtml(item.sessionId)}">Corregir series</button>
+        <button class="ghost small danger-ghost" data-action="delete-session-history" data-id="${escapeHtml(item.sessionId)}">Borrar sesión</button>
       </div>
     </article>
   `;
@@ -136,8 +136,8 @@ function renderManualHistoryCard(item) {
     <article class="list-item history-card history-card--manual">
       <div class="list-head">
         <div>
-          <h3 class="list-title">${item.title}</h3>
-          <p class="list-subtitle">Registro manual${item.routineName ? ` · ${item.routineName}` : ""}</p>
+          <h3 class="list-title">${escapeHtml(item.title)}</h3>
+          <p class="list-subtitle">Registro manual${item.routineName ? ` · ${escapeHtml(item.routineName)}` : ""}</p>
         </div>
         <span class="chip ghost">${formatNumber(item.maxWeight)} kg top</span>
       </div>
@@ -147,10 +147,10 @@ function renderManualHistoryCard(item) {
         <span class="chip warning">e1RM ${formatNumber(item.bestE1rm)} kg</span>
         <span class="chip ghost">Volumen ${formatNumber(item.volume)} kg</span>
       </div>
-      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${escapeHtml(item.notes)}</p>` : ""}
       <div class="actions-row">
-        <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
-        <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
+        <button class="ghost small" data-action="edit-history-group" data-id="${escapeHtml(item.groupId)}">Corregir</button>
+        <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${escapeHtml(item.groupId)}">Borrar bloque</button>
       </div>
     </article>
   `;
@@ -200,8 +200,8 @@ export function renderMeasurements(state, els) {
         <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
       </div>
       <div class="actions-row">
-        <button class="ghost small" data-action="edit-measurement" data-id="${item.id}">Editar</button>
-        <button class="ghost small" data-action="delete-measurement" data-id="${item.id}">Borrar</button>
+        <button class="ghost small" data-action="edit-measurement" data-id="${escapeHtml(item.id)}">Editar</button>
+        <button class="ghost small" data-action="delete-measurement" data-id="${escapeHtml(item.id)}">Borrar</button>
       </div>
     </article>
   `).join("") : emptyHtml("Todavía no hay mediciones.");

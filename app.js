@@ -24,7 +24,7 @@ import { renderDashboard, renderStats } from "./ui-dashboard.js";
 import { renderAnalytics, renderGoalForm, renderGoalSummary, renderPreferencesForm, renderPwaStatus } from "./ui-meta.js";
 import { renderMeasurements, renderPrList, renderRoutines, renderWorkoutList } from "./ui-records.js";
 import { renderSession } from "./ui-session.js";
-import { downloadBlob, FALLBACK_REST_SECONDS, formatDuration, formatNumber, isoFromLocalDateTime, moveItem, numOrBlank, offsetDate, optionalNumber, safeClone, todayLocal, toCsv, uid, roundToStep } from "./utils.js";
+import { downloadBlob, escapeHtml, FALLBACK_REST_SECONDS, formatDuration, formatNumber, isoFromLocalDateTime, moveItem, numOrBlank, offsetDate, optionalNumber, safeClone, todayLocal, toCsv, uid, roundToStep } from "./utils.js";
 
 const els = {
   networkBadge: document.querySelector("#networkBadge"),
@@ -134,6 +134,46 @@ let tickInterval = null;
 let editingEntriesContext = null;
 let selectedSessionRoutineId = "";
 let isSyncingManualWorkoutPanel = false;
+let routineSelectsKey = "";
+let muscleFilterKey = "";
+let routineDayFilterKey = "";
+
+function safeShowDialog(dialogEl) {
+  if (!dialogEl) return;
+  if (typeof dialogEl.showModal === "function") {
+    dialogEl.showModal();
+    return;
+  }
+  dialogEl.setAttribute("open", "");
+}
+
+function safeCloseDialog(dialogEl) {
+  if (!dialogEl) return;
+  if (typeof dialogEl.close === "function") {
+    dialogEl.close();
+    return;
+  }
+  dialogEl.removeAttribute("open");
+}
+
+function fillSelectWithOptions(selectEl, options, { placeholderLabel = "", placeholderValue = "" } = {}) {
+  if (!selectEl) return;
+  const fragment = document.createDocumentFragment();
+  if (placeholderLabel) {
+    const placeholder = document.createElement("option");
+    placeholder.value = placeholderValue;
+    placeholder.textContent = placeholderLabel;
+    fragment.appendChild(placeholder);
+  }
+  options.forEach(({ value, label }) => {
+    const option = document.createElement("option");
+    option.value = String(value ?? "");
+    option.textContent = String(label ?? "");
+    fragment.appendChild(option);
+  });
+  selectEl.innerHTML = "";
+  selectEl.appendChild(fragment);
+}
 
 boot();
 
@@ -177,8 +217,8 @@ function bindEvents() {
     await pwa.promptInstall();
     renderSettingsArea();
   });
-  els.iosInstallBtn.addEventListener("click", () => els.iosInstallDialog.showModal());
-  els.closeIosDialogBtn.addEventListener("click", () => els.iosInstallDialog.close());
+  els.iosInstallBtn.addEventListener("click", () => safeShowDialog(els.iosInstallDialog));
+  els.closeIosDialogBtn.addEventListener("click", () => safeCloseDialog(els.iosInstallDialog));
   els.refreshAppBtn.addEventListener("click", () => pwa.refreshApp());
 
   els.dashboardExerciseSelect.addEventListener("change", (event) => {
@@ -220,7 +260,7 @@ function bindEvents() {
     setSessionNotes(store.state, event.target.value);
     store.queueSave();
   });
-  els.startRestBtn.addEventListener("click", () => startRestTimer(Number(store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)));
+  els.startRestBtn.addEventListener("click", () => startRestTimer(Number(store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS)));
   els.stopRestBtn.addEventListener("click", stopRestTimer);
   els.manualWorkoutDetails.addEventListener("toggle", () => {
     if (isSyncingManualWorkoutPanel) return;
@@ -248,9 +288,9 @@ function bindEvents() {
   els.goalForm.addEventListener("submit", saveGoals);
   els.preferencesForm.addEventListener("submit", savePreferences);
   els.groupEditorForm.addEventListener("submit", saveEditedHistoryEntries);
-  els.closeGroupEditorBtn.addEventListener("click", () => els.groupEditorDialog.close());
+  els.closeGroupEditorBtn.addEventListener("click", () => safeCloseDialog(els.groupEditorDialog));
   els.sessionSetEditorForm?.addEventListener("submit", saveSessionSetEditor);
-  els.cancelSessionSetEditorBtn?.addEventListener("click", () => els.sessionSetEditorDialog.close());
+  els.cancelSessionSetEditorBtn?.addEventListener("click", () => safeCloseDialog(els.sessionSetEditorDialog));
 
   els.logSearchInput.addEventListener("input", (event) => {
     store.state.ui.logSearch = event.target.value;
@@ -449,12 +489,11 @@ function refreshAll() {
   refreshExerciseOptions();
   populateRoutineSelects();
   populateLogFilters();
-  renderStats(store.state, els);
   renderDashboardArea();
   renderMoreArea();
-  renderSessionArea();
+  renderSessionArea({ syncSelects: false });
   renderRoutinesArea();
-  renderLogsArea();
+  renderLogsArea({ syncSelects: false, syncFilters: false });
   renderMeasurementsArea();
   renderAnalyticsArea();
   renderGoalsArea();
@@ -464,14 +503,25 @@ function refreshAll() {
 function refreshExerciseOptions() {
   exerciseOptions = collectExerciseOptions({ workouts: store.state.workouts, routines: store.state.routines });
   muscleOptions = getMuscleGroupOptions({ workouts: store.state.workouts, routines: store.state.routines });
-  els.exerciseSuggestions.innerHTML = exerciseOptions.map((item) => `<option value="${item.name}"></option>`).join("");
+  const fragment = document.createDocumentFragment();
+  exerciseOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.name || "");
+    fragment.appendChild(option);
+  });
+  els.exerciseSuggestions.innerHTML = "";
+  els.exerciseSuggestions.appendChild(fragment);
 }
 
 function populateRoutineSelects() {
-  const routineOptions = store.state.routines.map((routine) => `<option value="${routine.id}">${routine.name}</option>`).join("");
-  els.sessionRoutineSelect.innerHTML = `<option value="">Selecciona rutina</option>${routineOptions}`;
-  els.workoutRoutineSelect.innerHTML = `<option value="">Sin rutina</option>${routineOptions}`;
-  els.logRoutineFilter.innerHTML = `<option value="all">Todas las rutinas</option>${routineOptions}`;
+  const routineOptions = store.state.routines.map((routine) => ({ value: routine.id, label: routine.name }));
+  const nextRoutineKey = routineOptions.map((item) => `${item.value}:${item.label}`).join("|");
+  if (nextRoutineKey !== routineSelectsKey) {
+    fillSelectWithOptions(els.sessionRoutineSelect, routineOptions, { placeholderLabel: "Selecciona rutina", placeholderValue: "" });
+    fillSelectWithOptions(els.workoutRoutineSelect, routineOptions, { placeholderLabel: "Sin rutina", placeholderValue: "" });
+    fillSelectWithOptions(els.logRoutineFilter, routineOptions, { placeholderLabel: "Todas las rutinas", placeholderValue: "all" });
+    routineSelectsKey = nextRoutineKey;
+  }
 
   const hasRoutine = (id) => Boolean(id && store.state.routines.some((item) => item.id === id));
   const preferredId = store.state.session.active
@@ -486,8 +536,15 @@ function populateRoutineSelects() {
 function populateLogFilters() {
   els.logSourceFilter.value = store.state.ui.logSource || "all";
   els.logDatePresetFilter.value = store.state.ui.logDatePreset || "all";
-  const options = muscleOptions.map((item) => `<option value="${item}">${item}</option>`).join("");
-  els.logMuscleFilter.innerHTML = `<option value="all">Todos los grupos</option>${options}`;
+  const nextMuscleKey = muscleOptions.join("|");
+  if (nextMuscleKey !== muscleFilterKey) {
+    fillSelectWithOptions(
+      els.logMuscleFilter,
+      muscleOptions.map((item) => ({ value: item, label: item })),
+      { placeholderLabel: "Todos los grupos", placeholderValue: "all" }
+    );
+    muscleFilterKey = nextMuscleKey;
+  }
   els.logMuscleFilter.value = store.state.ui.logMuscle || "all";
   els.logSearchInput.value = store.state.ui.logSearch || "";
   els.logSortSelect.value = store.state.ui.logSort || "date_desc";
@@ -498,8 +555,8 @@ function renderDashboardArea() {
   renderDashboard(store.state, els, exerciseOptions);
 }
 
-function renderSessionArea() {
-  populateRoutineSelects();
+function renderSessionArea({ syncSelects = true } = {}) {
+  if (syncSelects) populateRoutineSelects();
   const manualOpen = typeof store.state.ui.sessionManualOpen === "boolean"
     ? store.state.ui.sessionManualOpen
     : !store.state.preferences.collapseManualLog;
@@ -521,7 +578,15 @@ function renderRoutinesArea() {
 function populateRoutineLibraryFilters() {
   if (!els.routineSearchInput || !els.routineDayFilter) return;
   const days = [...new Set(store.state.routines.map((item) => String(item.day || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  els.routineDayFilter.innerHTML = `<option value="all">Todos los días / bloques</option>${days.map((day) => `<option value="${day}">${day}</option>`).join("")}`;
+  const nextDayKey = days.join("|");
+  if (nextDayKey !== routineDayFilterKey) {
+    fillSelectWithOptions(
+      els.routineDayFilter,
+      days.map((day) => ({ value: day, label: day })),
+      { placeholderLabel: "Todos los días / bloques", placeholderValue: "all" }
+    );
+    routineDayFilterKey = nextDayKey;
+  }
   els.routineSearchInput.value = store.state.ui.routineSearch || "";
   const requestedDayFilter = store.state.ui.routineDayFilter || "all";
   const isValidDayFilter = requestedDayFilter === "all" || days.includes(requestedDayFilter);
@@ -529,9 +594,9 @@ function populateRoutineLibraryFilters() {
   els.routineDayFilter.value = isValidDayFilter ? requestedDayFilter : "all";
 }
 
-function renderLogsArea() {
-  populateRoutineSelects();
-  populateLogFilters();
+function renderLogsArea({ syncSelects = true, syncFilters = true } = {}) {
+  if (syncSelects) populateRoutineSelects();
+  if (syncFilters) populateLogFilters();
   if (els.logFiltersPanel) els.logFiltersPanel.open = Boolean(store.state.ui.logFiltersOpen);
   if (els.toggleLogFiltersBtn) els.toggleLogFiltersBtn.setAttribute("aria-expanded", store.state.ui.logFiltersOpen ? "true" : "false");
   renderWorkoutList(store.state, els);
@@ -573,9 +638,9 @@ function refreshWorkoutDependentAreas() {
   populateLogFilters();
   renderDashboardArea();
   renderMoreArea();
-  renderSessionArea();
+  renderSessionArea({ syncSelects: false });
   renderRoutinesArea();
-  renderLogsArea();
+  renderLogsArea({ syncSelects: false, syncFilters: false });
   renderAnalyticsArea();
   renderGoalsArea();
 }
@@ -593,9 +658,9 @@ function refreshRoutineDependentAreas() {
   populateLogFilters();
   renderDashboardArea();
   renderMoreArea();
-  renderSessionArea();
+  renderSessionArea({ syncSelects: false });
   renderRoutinesArea();
-  renderLogsArea();
+  renderLogsArea({ syncSelects: false, syncFilters: false });
   renderAnalyticsArea();
 }
 
@@ -825,7 +890,7 @@ function fillLastReferenceValues(exerciseId) {
   }
   document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`).value = ref.weight;
   document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = ref.reps;
-  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = ref.rest || exercise.rest || store.state.preferences.defaultRestSeconds;
+  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = ref.rest ?? exercise.rest ?? store.state.preferences.defaultRestSeconds;
   toast(els, "Se han rellenado los valores de la última referencia.");
 }
 
@@ -837,7 +902,7 @@ function repeatLastSessionSet(exerciseId) {
   }
   document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`).value = last.weight;
   document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = last.reps;
-  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = last.rest || store.state.preferences.defaultRestSeconds;
+  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = last.rest ?? store.state.preferences.defaultRestSeconds;
   document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`).value = last.rpe === "" ? "" : last.rpe;
   toast(els, "Se han copiado los valores de la última serie.");
 }
@@ -852,7 +917,7 @@ function saveLastSessionSetAgain(exerciseId) {
     weight: Number(last.weight),
     reps: Number(last.reps),
     rpe: last.rpe,
-    rest: Number(last.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+    rest: Number(last.rest ?? store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS),
     isWarmup: Boolean(last.isWarmup)
   });
   if (!result.ok) {
@@ -879,7 +944,7 @@ function prefillFromExistingSet(entryId) {
   if (weightInput) weightInput.value = entry.weight;
   if (repsInput) repsInput.value = entry.reps;
   if (rpeInput) rpeInput.value = entry.rpe === "" ? "" : entry.rpe;
-  if (restInput) restInput.value = entry.rest || store.state.preferences.defaultRestSeconds;
+  if (restInput) restInput.value = entry.rest ?? store.state.preferences.defaultRestSeconds;
   if (warmupInput) warmupInput.checked = Boolean(entry.isWarmup);
   toast(els, "Serie cargada en el formulario rápido.");
 }
@@ -896,9 +961,9 @@ function handleEditSessionSet(entryId) {
   els.sessionSetEditorForm.weight.value = entry.weight;
   els.sessionSetEditorForm.reps.value = entry.reps;
   els.sessionSetEditorForm.rpe.value = entry.rpe === "" ? "" : entry.rpe;
-  els.sessionSetEditorForm.rest.value = entry.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+  els.sessionSetEditorForm.rest.value = entry.rest ?? store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS;
   els.sessionSetEditorForm.isWarmup.checked = Boolean(entry.isWarmup);
-  els.sessionSetEditorDialog.showModal();
+  safeShowDialog(els.sessionSetEditorDialog);
 }
 
 function saveSessionSetEditor(event) {
@@ -917,7 +982,7 @@ function saveSessionSetEditor(event) {
     toast(els, result.message);
     return;
   }
-  els.sessionSetEditorDialog.close();
+  safeCloseDialog(els.sessionSetEditorDialog);
   store.queueSave();
   renderSessionArea();
   renderDashboardArea();
@@ -1084,7 +1149,7 @@ function addExerciseRow(data = {}, afterRow = null) {
   row.querySelector('[data-field="name"]').value = data.name || "";
   row.querySelector('[data-field="sets"]').value = data.sets || "";
   row.querySelector('[data-field="reps"]').value = data.reps || "";
-  row.querySelector('[data-field="rest"]').value = data.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+  row.querySelector('[data-field="rest"]').value = data.rest ?? store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS;
   row.querySelector('[data-field="notes"]').value = data.notes || "";
   if (afterRow && afterRow.parentNode) {
     afterRow.insertAdjacentElement("afterend", row);
@@ -1258,7 +1323,7 @@ function openHistoryGroupEditor(groupId) {
   editingEntriesContext = { entryIds, sessionId, mode: 'group', allowSetEditing: true };
   els.groupEditorTitle.textContent = `Corregir bloque: ${entries[0].exercise}`;
   els.groupEditorContent.innerHTML = buildEditorRows(entries);
-  els.groupEditorDialog.showModal();
+  safeShowDialog(els.groupEditorDialog);
 }
 
 function openSessionHistoryEditor(sessionId) {
@@ -1267,7 +1332,7 @@ function openSessionHistoryEditor(sessionId) {
   editingEntriesContext = { entryIds: entries.map((item) => item.id), sessionId, mode: 'session', allowSetEditing: false };
   els.groupEditorTitle.textContent = `Corregir sesión completa`;
   els.groupEditorContent.innerHTML = buildEditorRows(entries, true);
-  els.groupEditorDialog.showModal();
+  safeShowDialog(els.groupEditorDialog);
 }
 
 function buildEditorRows(entries, includeExercise = false) {
@@ -1275,10 +1340,10 @@ function buildEditorRows(entries, includeExercise = false) {
   return `
     <div class="editor-grid">
       ${entries.map((entry, index) => `
-        <section class="editor-row" data-entry-id="${entry.id}">
+        <section class="editor-row" data-entry-id="${escapeHtml(entry.id)}">
           <div class="editor-row-head">
             <strong>Serie ${index + 1}</strong>
-            ${includeExercise ? `<span class="chip ghost">${entry.exercise}</span>` : ''}
+            ${includeExercise ? `<span class="chip ghost">${escapeHtml(entry.exercise)}</span>` : ''}
           </div>
           <div class="editor-row-grid">
             <label>Kg<input name="weight" type="number" min="0" step="0.5" value="${entry.weight}"></label>
@@ -1288,7 +1353,7 @@ function buildEditorRows(entries, includeExercise = false) {
             <label>Reps<input name="reps" type="number" min="1" step="1" value="${entry.reps}"></label>
             <label>RPE<input name="rpe" type="number" min="1" max="10" step="0.5" value="${entry.rpe === '' ? '' : entry.rpe}"></label>
             <label>Descanso<input name="rest" type="number" min="0" step="15" value="${entry.rest === '' ? '' : entry.rest}"></label>
-            <label>Notas<textarea name="notes">${entry.notes || ''}</textarea></label>
+            <label>Notas<textarea name="notes">${escapeHtml(entry.notes || "")}</textarea></label>
           </div>
         </section>
       `).join('')}
@@ -1320,7 +1385,7 @@ function saveEditedHistoryEntries(event) {
     entry.updatedAt = new Date().toISOString();
   }
   if (editingEntriesContext.sessionId) syncSessionHistoryEntry(store.state, editingEntriesContext.sessionId);
-  els.groupEditorDialog.close();
+  safeCloseDialog(els.groupEditorDialog);
   editingEntriesContext = null;
   store.queueSave();
   refreshWorkoutDependentAreas();

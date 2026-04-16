@@ -52,7 +52,15 @@ function renderAnalyticsCharts(state, els, exerciseOptions) {
     if (!state.ui.analyticsLiftId || !exerciseOptions.some((item) => item.id === state.ui.analyticsLiftId)) {
       state.ui.analyticsLiftId = exerciseOptions[0].id;
     }
-    els.analyticsLiftSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+    const fragment = document.createDocumentFragment();
+    exerciseOptions.forEach((item) => {
+      const option = document.createElement("option");
+      option.value = String(item.id || "");
+      option.textContent = String(item.name || "");
+      fragment.appendChild(option);
+    });
+    els.analyticsLiftSelect.innerHTML = "";
+    els.analyticsLiftSelect.appendChild(fragment);
     els.analyticsLiftSelect.value = state.ui.analyticsLiftId;
     const liftPoints = buildExerciseChartPoints(state, state.ui.analyticsLiftId, "e1rm", state.ui.chartAggregation || "day");
     els.analyticsLiftChart.innerHTML = liftPoints.length >= 2 ? buildLineChart(liftPoints, " kg", "Evolución de e1RM") : emptyHtml("Necesitas al menos dos referencias del ejercicio.");

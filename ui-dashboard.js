@@ -9,7 +9,7 @@ import {
   getSuggestedRoutine
 } from "./analytics-core.js";
 import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
-import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
+import { escapeHtml, formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
 export function renderStats(state, els) {
   const stats = computeStats(state);
@@ -87,12 +87,12 @@ function renderPrimaryAction(state, els) {
   els.dashboardPrimaryCard.innerHTML = `
     <div class="hero-copy">
       <span class="pill">Recomendación</span>
-      <h2>Entrena ${suggestion.routine.name} ahora</h2>
+      <h2>Entrena ${escapeHtml(suggestion.routine.name)} ahora</h2>
       <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
       <p>${suggestion.reason} ${lastLabel}.</p>
     </div>
     <div class="hero-actions hero-actions--stack-mobile">
-      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
+      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Empezar rutina recomendada</button>
       <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
     </div>
   `;
@@ -113,7 +113,7 @@ function renderLauncher(state, els) {
       title: `Arrancar ${suggestion.routine.name}`,
       subtitle: suggestion.reason,
       chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
-      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
+      footer: `<button data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Empezar</button>`
     }));
   }
 
@@ -159,7 +159,7 @@ function renderRecentStory(state, els) {
         { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
         ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
       ],
-    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
+    footer: item.notes ? `<p class="helper-line">📝 ${escapeHtml(item.notes)}</p>` : ""
   }));
   els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
 }
@@ -175,7 +175,15 @@ function renderExerciseSelect(state, els, exerciseOptions) {
     state.ui.dashboardExerciseId = exerciseOptions[0].id;
   }
 
-  els.dashboardExerciseSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+  const fragment = document.createDocumentFragment();
+  exerciseOptions.forEach((item) => {
+    const option = document.createElement("option");
+    option.value = String(item.id || "");
+    option.textContent = String(item.name || "");
+    fragment.appendChild(option);
+  });
+  els.dashboardExerciseSelect.innerHTML = "";
+  els.dashboardExerciseSelect.appendChild(fragment);
   els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
   els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
   els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
