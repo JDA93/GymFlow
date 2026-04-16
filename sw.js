@@ -4,7 +4,7 @@ const CORE_ASSETS = [
   "./index.html",
   "./styles.css",
   "./app.js",
-  "./analytics.js",
+  "./analytics-core.js",
   "./catalog.js",
   "./session.js",
   "./store.js",

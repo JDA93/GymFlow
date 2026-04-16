@@ -1,719 +1,1736 @@
+import { collectExerciseOptions, getExerciseMeta, getMuscleGroupOptions, normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
+import { buildWorkoutGroups, computeStats, getExerciseReference, getSuggestedRoutine, resolveGroupEntries, syncAllSessionHistory, syncSessionHistoryEntry } from "./analytics-core.js";
+import { createPwaManager } from "./pwa.js";
 import {
-  buildRepsLabel,
-  calcVolume,
-  calcVolumeFromEntries,
-  clamp,
-  daysBetween,
-  estimateE1RM,
-  formatNumber,
-  groupBy,
-  linearRegressionSlope,
-  monthLabel,
-  normalizeNameForMatch,
-  parseRepRange,
-  relativeDaysLabel,
-  shortLabel,
-  sortByDateAsc,
-  sortByDateDesc,
-  startOfWeek,
-  todayLocal,
-  uniq,
-  weekLabel
-} from "./utils.js";
+  addSessionSet,
+  beginSessionFromRoutine,
+  copyLastSessionIntoActive,
+  deleteSessionSet,
+  discardActiveSession,
+  endSession,
+  getSessionDurationSeconds,
+  getSessionEntriesByExercise,
+  getNextSuggestedExerciseId,
+  getWorkingEntriesByExercise,
+  hasActiveSessionRisk,
+  restoreLastDeletedSessionSet,
+  setSessionNotes,
+  toggleSkipExercise,
+  updateSessionSet
+} from "./session.js";
+import { createStore, defaultState, migrateState } from "./store.js";
+import { setActiveTab, toast } from "./ui-common.js";
+import { renderDashboard, renderStats } from "./ui-dashboard.js";
+import { renderAnalytics, renderGoalForm, renderGoalSummary, renderPreferencesForm, renderPwaStatus } from "./ui-meta.js";
+import { renderMeasurements, renderPrList, renderRoutines, renderWorkoutList } from "./ui-records.js";
+import { renderSession } from "./ui-session.js";
+import { downloadBlob, FALLBACK_REST_SECONDS, formatDuration, formatNumber, isoFromLocalDateTime, moveItem, numOrBlank, offsetDate, optionalNumber, safeClone, todayLocal, toCsv, uid, roundToStep } from "./utils.js";
 
-export const BODY_METRIC_LABELS = {
-  bodyWeight: "Peso",
-  bodyFat: "Grasa corporal",
-  waist: "Cintura",
-  chest: "Pecho",
-  arm: "Brazo",
-  thigh: "Pierna",
-  hips: "Cadera",
-  neck: "Cuello",
-  sleepHours: "Sueño"
+const els = {
+  networkBadge: document.querySelector("#networkBadge"),
+  saveStatusBadge: document.querySelector("#saveStatusBadge"),
+  installBtn: document.querySelector("#installBtn"),
+  iosInstallBtn: document.querySelector("#iosInstallBtn"),
+  loadDemoBtn: document.querySelector("#loadDemoBtn"),
+  exportBtn: document.querySelector("#exportBtn"),
+  exportCsvBtn: document.querySelector("#exportCsvBtn"),
+  importInput: document.querySelector("#importInput"),
+  resetBtn: document.querySelector("#resetBtn"),
+  refreshAppBtn: document.querySelector("#refreshAppBtn"),
+  updateBanner: document.querySelector("#updateBanner"),
+  dashboardPrimaryCard: document.querySelector("#dashboardPrimaryCard"),
+  recommendedRoutine: document.querySelector("#recommendedRoutine"),
+  quickSignals: document.querySelector("#quickSignals"),
+  recentStory: document.querySelector("#recentStory"),
+  dashboardExerciseSelect: document.querySelector("#dashboardExerciseSelect"),
+  dashboardExerciseMetricSelect: document.querySelector("#dashboardExerciseMetricSelect"),
+  chartAggregationSelect: document.querySelector("#chartAggregationSelect"),
+  dashboardMetricSelect: document.querySelector("#dashboardMetricSelect"),
+  exerciseChart: document.querySelector("#exerciseChart"),
+  bodyChart: document.querySelector("#bodyChart"),
+  statSessionsMonth: document.querySelector("#statSessionsMonth"),
+  statStreak: document.querySelector("#statStreak"),
+  statWeight: document.querySelector("#statWeight"),
+  statBestLift: document.querySelector("#statBestLift"),
+  statBestLiftLabel: document.querySelector("#statBestLiftLabel"),
+  statBestE1rm: document.querySelector("#statBestE1rm"),
+  statBestE1rmLabel: document.querySelector("#statBestE1rmLabel"),
+  sessionRoutineSelect: document.querySelector("#sessionRoutineSelect"),
+  startSessionBtn: document.querySelector("#startSessionBtn"),
+  endSessionBtn: document.querySelector("#endSessionBtn"),
+  discardSessionBtn: document.querySelector("#discardSessionBtn"),
+  copyLastSessionBtn: document.querySelector("#copyLastSessionBtn"),
+  sessionStatusLabel: document.querySelector("#sessionStatusLabel"),
+  sessionDurationLabel: document.querySelector("#sessionDurationLabel"),
+  sessionVolumeLabel: document.querySelector("#sessionVolumeLabel"),
+  sessionNotes: document.querySelector("#sessionNotes"),
+  activeSessionCard: document.querySelector("#activeSessionCard"),
+  startRestBtn: document.querySelector("#startRestBtn"),
+  stopRestBtn: document.querySelector("#stopRestBtn"),
+  restTimerLabel: document.querySelector("#restTimerLabel"),
+  manualWorkoutDetails: document.querySelector("#manualWorkoutDetails"),
+  workoutForm: document.querySelector("#workoutForm"),
+  cancelWorkoutEditBtn: document.querySelector("#cancelWorkoutEditBtn"),
+  workoutRoutineSelect: document.querySelector("#workoutRoutineSelect"),
+  routineForm: document.querySelector("#routineForm"),
+  addExerciseRowBtn: document.querySelector("#addExerciseRowBtn"),
+  exerciseRows: document.querySelector("#exerciseRows"),
+  exerciseRowTemplate: document.querySelector("#exerciseRowTemplate"),
+  routineList: document.querySelector("#routineList"),
+  routineSearchInput: document.querySelector("#routineSearchInput"),
+  routineDayFilter: document.querySelector("#routineDayFilter"),
+  routineFilterSummary: document.querySelector("#routineFilterSummary"),
+  cancelRoutineEditBtn: document.querySelector("#cancelRoutineEditBtn"),
+  logFilterSummary: document.querySelector("#logFilterSummary"),
+  workoutList: document.querySelector("#workoutList"),
+  prList: document.querySelector("#prList"),
+  logSearchInput: document.querySelector("#logSearchInput"),
+  logRoutineFilter: document.querySelector("#logRoutineFilter"),
+  logSortSelect: document.querySelector("#logSortSelect"),
+  logSourceFilter: document.querySelector("#logSourceFilter"),
+  logMuscleFilter: document.querySelector("#logMuscleFilter"),
+  logDatePresetFilter: document.querySelector("#logDatePresetFilter"),
+  toggleLogFiltersBtn: document.querySelector("#toggleLogFiltersBtn"),
+  logFiltersPanel: document.querySelector("#logFiltersPanel"),
+  moreLastSection: document.querySelector("#moreLastSection"),
+  moreLastSectionBtn: document.querySelector("#moreLastSectionBtn"),
+  measurementForm: document.querySelector("#measurementForm"),
+  measurementList: document.querySelector("#measurementList"),
+  cancelMeasurementEditBtn: document.querySelector("#cancelMeasurementEditBtn"),
+  analyticsHighlights: document.querySelector("#analyticsHighlights"),
+  analyticsLiftSelect: document.querySelector("#analyticsLiftSelect"),
+  analyticsLiftChart: document.querySelector("#analyticsLiftChart"),
+  analyticsFrequencyChart: document.querySelector("#analyticsFrequencyChart"),
+  analyticsVolumeChart: document.querySelector("#analyticsVolumeChart"),
+  analyticsMonthlyChart: document.querySelector("#analyticsMonthlyChart"),
+  analyticsStalls: document.querySelector("#analyticsStalls"),
+  analyticsMuscles: document.querySelector("#analyticsMuscles"),
+  analyticsHabits: document.querySelector("#analyticsHabits"),
+  goalForm: document.querySelector("#goalForm"),
+  goalSummary: document.querySelector("#goalSummary"),
+  preferencesForm: document.querySelector("#preferencesForm"),
+  pwaStatusBox: document.querySelector("#pwaStatusBox"),
+  iosInstallDialog: document.querySelector("#iosInstallDialog"),
+  closeIosDialogBtn: document.querySelector("#closeIosDialogBtn"),
+  groupEditorDialog: document.querySelector("#groupEditorDialog"),
+  groupEditorForm: document.querySelector("#groupEditorForm"),
+  groupEditorTitle: document.querySelector("#groupEditorTitle"),
+  groupEditorContent: document.querySelector("#groupEditorContent"),
+  closeGroupEditorBtn: document.querySelector("#closeGroupEditorBtn"),
+  sessionSetEditorDialog: document.querySelector("#sessionSetEditorDialog"),
+  sessionSetEditorForm: document.querySelector("#sessionSetEditorForm"),
+  sessionSetEditorTitle: document.querySelector("#sessionSetEditorTitle"),
+  cancelSessionSetEditorBtn: document.querySelector("#cancelSessionSetEditorBtn"),
+  exerciseSuggestions: document.querySelector("#exerciseSuggestions"),
+  toastRegion: document.querySelector("#toastRegion")
 };
 
-export function getActiveRoutine(state) {
-  return state.routines.find((item) => item.id === state.session.routineId) || null;
+let store;
+let pwa;
+let exerciseOptions = [];
+let muscleOptions = [];
+let wakeLock = null;
+let tickInterval = null;
+let editingEntriesContext = null;
+let selectedSessionRoutineId = "";
+let isSyncingManualWorkoutPanel = false;
+
+boot();
+
+async function boot() {
+  store = await createStore(els.saveStatusBadge);
+  ensureMinimumData();
+  selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
+  syncAllSessionHistory(store.state);
+  pwa = createPwaManager(els, () => renderSettingsArea());
+  await pwa.init();
+  bindEvents();
+  setDefaultDates();
+  cancelRoutineEdit();
+  cancelWorkoutEdit();
+  cancelMeasurementEdit();
+  setActiveTab(store.state, store.state.ui.activeTab || "dashboard");
+  refreshAll();
+  updateNetworkStatus();
+  startTickers();
+  store.queueSave();
 }
 
-export function getUniqueWorkoutDates(state) {
-  return uniq(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date)).sort().reverse();
+function bindEvents() {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      setActiveTab(store.state, tab.dataset.tab);
+      store.queueSave();
+    });
+    tab.addEventListener("keydown", handleTabKeydown);
+  });
+
+  document.addEventListener("click", handleDelegatedClick);
+
+  els.loadDemoBtn.addEventListener("click", loadDemoData);
+  els.exportBtn.addEventListener("click", exportJson);
+  els.exportCsvBtn.addEventListener("click", exportCsv);
+  els.importInput.addEventListener("change", importJson);
+  els.resetBtn.addEventListener("click", resetAllData);
+
+  els.installBtn.addEventListener("click", async () => {
+    await pwa.promptInstall();
+    renderSettingsArea();
+  });
+  els.iosInstallBtn.addEventListener("click", () => els.iosInstallDialog.showModal());
+  els.closeIosDialogBtn.addEventListener("click", () => els.iosInstallDialog.close());
+  els.refreshAppBtn.addEventListener("click", () => pwa.refreshApp());
+
+  els.dashboardExerciseSelect.addEventListener("change", (event) => {
+    store.state.ui.dashboardExerciseId = event.target.value;
+    renderDashboardArea();
+    store.queueSave();
+  });
+  els.dashboardExerciseMetricSelect.addEventListener("change", (event) => {
+    store.state.ui.dashboardExerciseMetric = event.target.value;
+    renderDashboardArea();
+    store.queueSave();
+  });
+  els.dashboardMetricSelect.addEventListener("change", (event) => {
+    store.state.ui.dashboardMetric = event.target.value;
+    renderDashboardArea();
+    store.queueSave();
+  });
+  els.chartAggregationSelect?.addEventListener("change", (event) => {
+    store.state.ui.chartAggregation = event.target.value;
+    renderDashboardArea();
+    renderAnalyticsArea();
+    store.queueSave();
+  });
+  els.analyticsLiftSelect.addEventListener("change", (event) => {
+    store.state.ui.analyticsLiftId = event.target.value;
+    renderAnalyticsArea();
+    store.queueSave();
+  });
+
+  els.sessionRoutineSelect.addEventListener("change", (event) => {
+    selectedSessionRoutineId = event.target.value || "";
+  });
+
+  els.startSessionBtn.addEventListener("click", startSessionFromSelect);
+  els.endSessionBtn.addEventListener("click", handleEndSession);
+  els.discardSessionBtn.addEventListener("click", handleDiscardSession);
+  els.copyLastSessionBtn.addEventListener("click", handleCopyLastSession);
+  els.sessionNotes.addEventListener("input", (event) => {
+    setSessionNotes(store.state, event.target.value);
+    store.queueSave();
+  });
+  els.startRestBtn.addEventListener("click", () => startRestTimer(Number(store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS)));
+  els.stopRestBtn.addEventListener("click", stopRestTimer);
+  els.manualWorkoutDetails.addEventListener("toggle", () => {
+    if (isSyncingManualWorkoutPanel) return;
+    store.state.ui.sessionManualOpen = els.manualWorkoutDetails.open;
+    store.queueSave();
+  });
+
+  els.workoutForm.addEventListener("submit", saveWorkoutFromForm);
+  els.cancelWorkoutEditBtn.addEventListener("click", cancelWorkoutEdit);
+  els.routineForm.addEventListener("submit", saveRoutineFromForm);
+  els.routineSearchInput?.addEventListener("input", (event) => {
+    store.state.ui.routineSearch = event.target.value;
+    renderRoutinesArea();
+    store.queueSave();
+  });
+  els.routineDayFilter?.addEventListener("change", (event) => {
+    store.state.ui.routineDayFilter = event.target.value;
+    renderRoutinesArea();
+    store.queueSave();
+  });
+  els.addExerciseRowBtn.addEventListener("click", () => addExerciseRow());
+  els.cancelRoutineEditBtn.addEventListener("click", cancelRoutineEdit);
+  els.measurementForm.addEventListener("submit", saveMeasurementFromForm);
+  els.cancelMeasurementEditBtn.addEventListener("click", cancelMeasurementEdit);
+  els.goalForm.addEventListener("submit", saveGoals);
+  els.preferencesForm.addEventListener("submit", savePreferences);
+  els.groupEditorForm.addEventListener("submit", saveEditedHistoryEntries);
+  els.closeGroupEditorBtn.addEventListener("click", () => els.groupEditorDialog.close());
+  els.sessionSetEditorForm?.addEventListener("submit", saveSessionSetEditor);
+  els.cancelSessionSetEditorBtn?.addEventListener("click", () => els.sessionSetEditorDialog.close());
+
+  els.logSearchInput.addEventListener("input", (event) => {
+    store.state.ui.logSearch = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.logRoutineFilter.addEventListener("change", (event) => {
+    store.state.ui.logRoutine = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.logSortSelect.addEventListener("change", (event) => {
+    store.state.ui.logSort = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.logSourceFilter.addEventListener("change", (event) => {
+    store.state.ui.logSource = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.logMuscleFilter.addEventListener("change", (event) => {
+    store.state.ui.logMuscle = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.logDatePresetFilter.addEventListener("change", (event) => {
+    store.state.ui.logDatePreset = event.target.value;
+    renderLogsArea();
+    store.queueSave();
+  });
+  els.toggleLogFiltersBtn?.addEventListener("click", () => {
+    const open = !els.logFiltersPanel.open;
+    els.logFiltersPanel.open = open;
+    els.toggleLogFiltersBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    store.state.ui.logFiltersOpen = open;
+    store.queueSave();
+  });
+  els.logFiltersPanel?.addEventListener("toggle", () => {
+    const open = els.logFiltersPanel.open;
+    if (els.toggleLogFiltersBtn) els.toggleLogFiltersBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    store.state.ui.logFiltersOpen = open;
+    store.queueSave();
+  });
+
+  window.addEventListener("online", updateNetworkStatus);
+  window.addEventListener("offline", updateNetworkStatus);
+  window.addEventListener("resize", syncToastOffsetFromBottomNav);
+  window.addEventListener("orientationchange", syncToastOffsetFromBottomNav);
+  window.addEventListener("pagehide", () => {
+    releaseWakeLock();
+    store.flushSave().catch(() => {});
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      store.flushSave().catch(() => {});
+    } else if (document.visibilityState === "visible" && store.state.preferences.keepScreenAwake && store.state.session.active) {
+      requestWakeLock();
+    }
+  });
+  window.addEventListener("beforeunload", (event) => {
+    if (hasActiveSessionRisk(store.state)) {
+      event.preventDefault();
+      event.returnValue = "";
+    }
+  });
 }
 
-export function computeStreak(state) {
-  const workoutDates = getUniqueWorkoutDates(state);
-  if (!workoutDates.length) return 0;
-  if (daysBetween(workoutDates[0], todayLocal()) > 2) return 0;
-
-  let streak = 1;
-  for (let index = 1; index < workoutDates.length; index += 1) {
-    const diff = daysBetween(workoutDates[index], workoutDates[index - 1]);
-    if (diff <= 2) streak += 1;
-    else break;
+function handleTabKeydown(event) {
+  const tabs = [...document.querySelectorAll(".tab")];
+  const currentIndex = tabs.indexOf(event.currentTarget);
+  if (currentIndex < 0) return;
+  if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+    event.preventDefault();
+    const nextIndex = event.key === "ArrowRight" ? (currentIndex + 1) % tabs.length : (currentIndex - 1 + tabs.length) % tabs.length;
+    tabs[nextIndex].focus();
+    setActiveTab(store.state, tabs[nextIndex].dataset.tab);
+    store.queueSave();
   }
-  return streak;
 }
 
-export function computeStats(state) {
-  const workoutDates = getUniqueWorkoutDates(state);
-  const monthPrefix = todayLocal().slice(0, 7);
-  const daysTrainedThisMonth = workoutDates.filter((date) => date.startsWith(monthPrefix)).length;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0] || null;
-  const bestLift = state.workouts.reduce((best, item) => !item.isWarmup && (!best || Number(item.weight) > Number(best.weight)) ? item : best, null);
-  const bestE1rm = state.workouts
-    .filter((item) => !item.isWarmup)
-    .reduce((best, item) => {
-      const value = estimateE1RM(item.weight, item.reps);
-      if (!best || value > best.value) return { value, item };
-      return best;
-    }, null);
-
-  const lastSession = [...state.sessionHistory].sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))[0] || null;
-
-  return {
-    daysTrainedThisMonth,
-    continuityActive: computeStreak(state),
-    latestMeasurement,
-    bestLift,
-    bestE1rm,
-    lastSession
-  };
+function handleDelegatedClick(event) {
+  const button = event.target.closest("[data-action]");
+  if (!button) return;
+  handleAction(button.dataset.action, button.dataset.id, button);
 }
 
-export function computeLastDateByRoutine(state) {
-  return state.workouts.reduce((acc, item) => {
-    if (!item.routineId) return acc;
-    if (!acc[item.routineId] || String(item.date).localeCompare(String(acc[item.routineId])) > 0) {
-      acc[item.routineId] = item.date;
-    }
-    return acc;
-  }, {});
-}
-
-export function getSuggestedRoutine(state) {
-  const lastDateByRoutine = computeLastDateByRoutine(state);
-  const ordered = [...state.routines].sort((a, b) => {
-    const dateA = lastDateByRoutine[a.id];
-    const dateB = lastDateByRoutine[b.id];
-    if (!dateA && !dateB) return a.name.localeCompare(b.name, "es");
-    if (!dateA) return -1;
-    if (!dateB) return 1;
-    return String(dateA).localeCompare(String(dateB));
-  });
-
-  const routine = ordered[0] || null;
-  if (!routine) return { routine: null, reason: "", daysSince: null };
-
-  const lastDate = lastDateByRoutine[routine.id] || null;
-  const daysSince = lastDate ? daysBetween(lastDate, todayLocal()) : null;
-
-  return {
-    routine,
-    daysSince,
-    reason: lastDate
-      ? `Es la rutina que llevas más tiempo sin tocar.`
-      : `Todavía no la has usado, así que es la mejor candidata para arrancar.`
-  };
-}
-
-export function buildRoutineMetadata(state, routine) {
-  const lastDateByRoutine = computeLastDateByRoutine(state);
-  const blocks = uniq((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean));
-  const totalSets = (routine.exercises || []).reduce((sum, exercise) => sum + Number(exercise.sets || 0), 0);
-  const lowRepBias = (routine.exercises || []).filter((exercise) => parseRepRange(exercise.reps).max && parseRepRange(exercise.reps).max <= 6).length;
-  const complexityScore = totalSets + blocks.length * 2 + lowRepBias * 1.5;
-  let complexityLabel = "Ligera";
-  if (complexityScore >= 16) complexityLabel = "Sólida";
-  if (complexityScore >= 24) complexityLabel = "Alta";
-
-  return {
-    lastDate: lastDateByRoutine[routine.id] || "",
-    exerciseCount: (routine.exercises || []).length,
-    blockCount: blocks.length,
-    totalSets,
-    complexityLabel,
-    complexityScore
-  };
-}
-
-export function buildWorkoutGroups(state, { includeWarmups = true } = {}) {
-  const routineMap = Object.fromEntries(state.routines.map((routine) => [routine.id, routine]));
-  const filtered = state.workouts.filter((item) => includeWarmups || !item.isWarmup);
-  const groups = new Map();
-
-  filtered.forEach((item) => {
-    const exerciseGroupKey = item.exerciseId || item.exerciseKey || item.exercise;
-    const groupKey = item.sessionId ? `session|${item.sessionId}|${exerciseGroupKey}` : `manual|${item.id}`;
-
-    if (!groups.has(groupKey)) {
-      groups.set(groupKey, {
-        groupId: groupKey,
-        primaryId: item.id,
-        sessionId: item.sessionId || "",
-        exercise: item.exercise,
-        exerciseId: item.exerciseId || exerciseGroupKey,
-        date: item.date,
-        routineId: item.routineId || "",
-        routineName: routineMap[item.routineId]?.name || "",
-        source: item.source || "manual",
-        sourceLabel: item.sessionId ? "Desde sesión" : "Registro manual",
-        setCount: 0,
-        repsList: [],
-        maxWeight: 0,
-        volume: 0,
-        bestE1rm: 0,
-        entries: [],
-        containsWarmup: false,
-        latestCreatedAt: item.createdAt || item.updatedAt || `${item.date}T00:00:00`,
-        muscleGroup: item.muscleGroup || ""
-      });
-    }
-
-    const group = groups.get(groupKey);
-    group.entries.push(item);
-    group.setCount += Number(item.sets || 1);
-    group.repsList.push(Number(item.reps || 0));
-    group.maxWeight = Math.max(group.maxWeight, Number(item.weight || 0));
-    group.volume += calcVolume(item);
-    group.bestE1rm = Math.max(group.bestE1rm, estimateE1RM(item.weight, item.reps));
-    group.containsWarmup = group.containsWarmup || item.isWarmup;
-    if (String(item.createdAt || "") > String(group.latestCreatedAt || "")) group.latestCreatedAt = item.createdAt;
-  });
-
-  return [...groups.values()]
-    .map((group) => ({ ...group, repsLabel: buildRepsLabel(group.repsList) }))
-    .sort(sortWorkoutGroupsByDateDesc);
-}
-
-export function sortWorkoutGroupsByDateDesc(a, b) {
-  return getChronologicalAnchor(b) - getChronologicalAnchor(a);
-}
-
-export function getWorkoutGroupSorter(sortBy) {
-  switch (sortBy) {
-    case "date_asc":
-      return (a, b) => getChronologicalAnchor(a) - getChronologicalAnchor(b);
-    case "weight_desc":
-      return (a, b) => Number(b.maxWeight) - Number(a.maxWeight) || sortWorkoutGroupsByDateDesc(a, b);
-    case "exercise_asc":
-      return (a, b) => a.exercise.localeCompare(b.exercise, "es") || sortWorkoutGroupsByDateDesc(a, b);
+function handleAction(action, id, trigger) {
+  switch (action) {
+    case "open-tab":
+      if (["routines", "measurements", "analytics", "goals", "settings"].includes(id)) {
+        store.state.ui.moreSection = id;
+      }
+      if (id === "more" && ["routines", "measurements", "analytics", "goals", "settings"].includes(store.state.ui.activeTab)) {
+        store.state.ui.moreSection = store.state.ui.activeTab;
+      }
+      setActiveTab(store.state, id);
+      if (id === "more") renderMoreArea();
+      store.queueSave();
+      break;
+    case "open-last-more-section":
+      setActiveTab(store.state, store.state.ui.moreSection || "routines");
+      store.queueSave();
+      break;
+    case "load-demo":
+      loadDemoData();
+      break;
+    case "continue-session":
+      setActiveTab(store.state, "session");
+      break;
+    case "start-routine":
+      startRoutineById(id);
+      break;
+    case "edit-routine":
+      editRoutine(id);
+      break;
+    case "duplicate-routine":
+      duplicateRoutine(id);
+      break;
+    case "delete-routine":
+      deleteRoutine(id);
+      break;
+    case "apply-routine-template":
+      applyRoutineTemplate(id);
+      break;
+    case "edit-history-group":
+      openHistoryGroupEditor(id);
+      break;
+    case "edit-session-history":
+      openSessionHistoryEditor(id);
+      break;
+    case "delete-workout-group":
+      deleteWorkoutGroup(id);
+      break;
+    case "delete-session-history":
+      deleteSessionHistory(id);
+      break;
+    case "edit-measurement":
+      editMeasurement(id);
+      break;
+    case "delete-measurement":
+      deleteMeasurement(id);
+      break;
+    case "toggle-skip-exercise":
+      handleToggleSkipExercise(id);
+      break;
+    case "add-session-set":
+      handleAddSessionSet(id);
+      break;
+    case "delete-session-set":
+      handleDeleteSessionSet(id);
+      break;
+    case "fill-last-session-values":
+      fillLastReferenceValues(id);
+      break;
+    case "repeat-last-session-set":
+      repeatLastSessionSet(id);
+      break;
+    case "save-last-session-set-again":
+      saveLastSessionSetAgain(id);
+      break;
+    case "prefill-session-set":
+      prefillFromExistingSet(id);
+      break;
+    case "edit-session-set":
+      handleEditSessionSet(id);
+      break;
+    case "focus-current-exercise":
+      focusExerciseCard(id);
+      break;
+    case "jump-next-exercise":
+      jumpToNextExercise(id);
+      break;
+    case "remove-routine-row":
+      trigger.closest(".exercise-row")?.remove();
+      break;
+    case "add-below-routine-row":
+      addExerciseRow({}, trigger.closest(".exercise-row"));
+      break;
+    case "duplicate-routine-row":
+      duplicateRoutineRow(trigger.closest(".exercise-row"));
+      break;
+    case "move-routine-row-up":
+      moveRoutineRow(trigger.closest(".exercise-row"), -1);
+      break;
+    case "move-routine-row-down":
+      moveRoutineRow(trigger.closest(".exercise-row"), 1);
+      break;
     default:
-      return sortWorkoutGroupsByDateDesc;
+      break;
   }
 }
 
-export function buildSessionExerciseSummaries(state, sessionId) {
-  const entries = state.workouts.filter((item) => item.sessionId === sessionId && !item.isWarmup);
-  const grouped = Object.values(groupBy(entries, (item) => item.exerciseId || item.exerciseKey || item.exercise));
-  return grouped
-    .map((logs) => ({
-      exercise: logs[0].exercise,
-      setCount: logs.length,
-      maxWeight: Math.max(...logs.map((item) => Number(item.weight || 0))),
-      repsTop: logs.reduce((best, item) => Number(item.reps || 0) > Number(best.reps || 0) ? item : best, logs[0]).reps,
-      muscleGroup: logs[0].muscleGroup || ""
-    }))
-    .sort((a, b) => b.maxWeight - a.maxWeight || a.exercise.localeCompare(b.exercise, "es"));
+function refreshAll() {
+  syncToastOffsetFromBottomNav();
+  refreshExerciseOptions();
+  populateRoutineSelects();
+  populateLogFilters();
+  renderStats(store.state, els);
+  renderDashboardArea();
+  renderMoreArea();
+  renderSessionArea();
+  renderRoutinesArea();
+  renderLogsArea();
+  renderMeasurementsArea();
+  renderAnalyticsArea();
+  renderGoalsArea();
+  renderSettingsArea();
 }
 
-export function buildRecentActivity(state, limit = 6) {
-  const sessions = [...state.sessionHistory]
-    .sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))
-    .slice(0, limit)
-    .map((item) => ({
-      kind: "session",
-      title: item.routineName || "Sesión finalizada",
-      subtitle: `${item.totalSets} series · ${item.exercisesCompleted} ejercicios`,
-      date: item.date,
-      volume: item.volume,
-      durationSeconds: item.durationSeconds,
-      routineName: item.routineName,
-      sessionId: item.sessionId,
-      notes: item.notes || "",
-      sortAnchor: item.endedAt || item.startedAt || `${item.date}T00:00:00`
-    }));
-
-  const manualGroups = buildWorkoutGroups(state, { includeWarmups: false })
-    .filter((group) => !group.sessionId)
-    .slice(0, limit)
-    .map((group) => ({
-      kind: "manual",
-      title: group.exercise,
-      subtitle: `Registro suelto · ${group.setCount} series · ${formatNumber(group.maxWeight)} kg top`,
-      date: group.date,
-      volume: group.volume,
-      bestE1rm: group.bestE1rm,
-      routineName: group.routineName,
-      notes: group.entries.map((entry) => String(entry.notes || "").trim()).find(Boolean) || "",
-      sortAnchor: group.latestCreatedAt || `${group.date}T00:00:00`
-    }));
-
-  return [...sessions, ...manualGroups]
-    .sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))
-    .slice(0, limit);
+function refreshExerciseOptions() {
+  exerciseOptions = collectExerciseOptions({ workouts: store.state.workouts, routines: store.state.routines });
+  muscleOptions = getMuscleGroupOptions({ workouts: store.state.workouts, routines: store.state.routines });
+  els.exerciseSuggestions.innerHTML = exerciseOptions.map((item) => `<option value="${item.name}"></option>`).join("");
 }
 
-export function getExerciseHistory(state, exerciseIdOrName, options = {}) {
-  const { routineId = "", includeWarmups = false } = options;
-  return state.workouts
-    .filter((item) => {
-      const sameExercise = (item.exerciseId && item.exerciseId === exerciseIdOrName)
-        || item.exercise === exerciseIdOrName
-        || item.exerciseKey === exerciseIdOrName;
-      const sameRoutine = !routineId || item.routineId === routineId;
-      return sameExercise && sameRoutine && (includeWarmups || !item.isWarmup);
-    })
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.createdAt || "").localeCompare(String(a.createdAt || "")));
+function populateRoutineSelects() {
+  const routineOptions = store.state.routines.map((routine) => `<option value="${routine.id}">${routine.name}</option>`).join("");
+  els.sessionRoutineSelect.innerHTML = `<option value="">Selecciona rutina</option>${routineOptions}`;
+  els.workoutRoutineSelect.innerHTML = `<option value="">Sin rutina</option>${routineOptions}`;
+  els.logRoutineFilter.innerHTML = `<option value="all">Todas las rutinas</option>${routineOptions}`;
+
+  const hasRoutine = (id) => Boolean(id && store.state.routines.some((item) => item.id === id));
+  const preferredId = store.state.session.active
+    ? store.state.session.routineId
+    : (hasRoutine(selectedSessionRoutineId) ? selectedSessionRoutineId : (store.state.routines[0]?.id || ""));
+  selectedSessionRoutineId = preferredId || "";
+  els.sessionRoutineSelect.value = preferredId || "";
+
+  els.logRoutineFilter.value = store.state.ui.logRoutine || "all";
 }
 
-export function getExerciseReference(state, exerciseIdOrName, routineId = "") {
-  return getExerciseHistory(state, exerciseIdOrName, { routineId }).find((item) => !item.isWarmup)
-    || getExerciseHistory(state, exerciseIdOrName).find((item) => !item.isWarmup)
-    || null;
+function populateLogFilters() {
+  els.logSourceFilter.value = store.state.ui.logSource || "all";
+  els.logDatePresetFilter.value = store.state.ui.logDatePreset || "all";
+  const options = muscleOptions.map((item) => `<option value="${item}">${item}</option>`).join("");
+  els.logMuscleFilter.innerHTML = `<option value="all">Todos los grupos</option>${options}`;
+  els.logMuscleFilter.value = store.state.ui.logMuscle || "all";
+  els.logSearchInput.value = store.state.ui.logSearch || "";
+  els.logSortSelect.value = store.state.ui.logSort || "date_desc";
 }
 
-function getRoutineFocus(state, routineExercise) {
-  const routine = state.routines.find((item) => item.id === state.session.routineId)
-    || state.routines.find((item) => (item.exercises || []).some((exercise) => exercise.id === routineExercise.id));
-  return routine?.focus || "";
+function renderDashboardArea() {
+  renderStats(store.state, els);
+  renderDashboard(store.state, els, exerciseOptions);
 }
 
-export function nextLoadSuggestionForExercise(state, routineExercise) {
-  if (!routineExercise) return { value: 0, decision: "start", reason: "Sin referencias previas." };
-
-  const history = getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name, { routineId: state.session.routineId || "" });
-  const fallbackHistory = history.length ? history : getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name);
-
-  if (!fallbackHistory.length) return { value: 0, decision: "start", reason: "Sin referencias previas." };
-
-  const top = fallbackHistory[0];
-  const repRange = parseRepRange(routineExercise.reps);
-  const routineFocus = String(getRoutineFocus(state, routineExercise) || "").toLowerCase();
-  const isStrength = routineFocus.includes("fuerza") || (repRange.max > 0 && repRange.max <= 6);
-  const baseIncrement = Number(state.preferences.suggestionIncrement || 2.5);
-  const increment = isStrength && /sentadilla|peso muerto|prensa/i.test(routineExercise.name) ? baseIncrement * 2 : baseIncrement;
-  const lastRpe = top.rpe === "" ? null : Number(top.rpe);
-
-  if (lastRpe != null && lastRpe >= 9.5 && repRange.min && Number(top.reps || 0) < repRange.min) {
-    return { value: Math.max(0, Number(top.weight || 0) - increment), decision: "down", reason: "Última referencia demasiado exigente para el rango objetivo." };
+function renderSessionArea() {
+  populateRoutineSelects();
+  const manualOpen = typeof store.state.ui.sessionManualOpen === "boolean"
+    ? store.state.ui.sessionManualOpen
+    : !store.state.preferences.collapseManualLog;
+  if (els.manualWorkoutDetails.open !== manualOpen) {
+    isSyncingManualWorkoutPanel = true;
+    els.manualWorkoutDetails.open = manualOpen;
+    requestAnimationFrame(() => {
+      isSyncingManualWorkoutPanel = false;
+    });
   }
+  renderSession(store.state, els);
+}
 
-  if (repRange.max && Number(top.reps || 0) >= repRange.max && (lastRpe == null || lastRpe <= 8.5)) {
-    return { value: Number(top.weight || 0) + increment, decision: "up", reason: "Cumpliste el techo del rango con margen razonable." };
+function renderRoutinesArea() {
+  populateRoutineLibraryFilters();
+  renderRoutines(store.state, els);
+}
+
+function populateRoutineLibraryFilters() {
+  if (!els.routineSearchInput || !els.routineDayFilter) return;
+  const days = [...new Set(store.state.routines.map((item) => String(item.day || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  els.routineDayFilter.innerHTML = `<option value="all">Todos los días / bloques</option>${days.map((day) => `<option value="${day}">${day}</option>`).join("")}`;
+  els.routineSearchInput.value = store.state.ui.routineSearch || "";
+  const requestedDayFilter = store.state.ui.routineDayFilter || "all";
+  const isValidDayFilter = requestedDayFilter === "all" || days.includes(requestedDayFilter);
+  if (!isValidDayFilter) store.state.ui.routineDayFilter = "all";
+  els.routineDayFilter.value = isValidDayFilter ? requestedDayFilter : "all";
+}
+
+function renderLogsArea() {
+  populateRoutineSelects();
+  populateLogFilters();
+  if (els.logFiltersPanel) els.logFiltersPanel.open = Boolean(store.state.ui.logFiltersOpen);
+  if (els.toggleLogFiltersBtn) els.toggleLogFiltersBtn.setAttribute("aria-expanded", store.state.ui.logFiltersOpen ? "true" : "false");
+  renderWorkoutList(store.state, els);
+  renderPrList(store.state, els);
+}
+
+function renderMoreArea() {
+  const map = { routines: "Rutinas", measurements: "Medidas", analytics: "Evolución", goals: "Objetivos", settings: "Ajustes" };
+  const section = store.state.ui.moreSection;
+  if (!section || !map[section]) {
+    if (els.moreLastSection) els.moreLastSection.hidden = true;
+    return;
   }
+  if (els.moreLastSection) els.moreLastSection.hidden = false;
+  if (els.moreLastSectionBtn) els.moreLastSectionBtn.textContent = `Volver a ${map[section]}`;
+}
 
-  if (repRange.min && Number(top.reps || 0) < repRange.min) {
-    return { value: Number(top.weight || 0), decision: "hold", reason: "Mantén la carga hasta entrar estable en el rango objetivo." };
+function renderMeasurementsArea() {
+  renderMeasurements(store.state, els);
+}
+
+function renderAnalyticsArea() {
+  renderAnalytics(store.state, els, exerciseOptions);
+}
+
+function renderGoalsArea() {
+  renderGoalSummary(store.state, els);
+  renderGoalForm(store.state, els);
+}
+
+function renderSettingsArea() {
+  renderPreferencesForm(store.state, els);
+  renderPwaStatus(els, pwa.getStatus(), { mode: store.state.meta.storageMode || "indexeddb" });
+}
+
+function refreshWorkoutDependentAreas() {
+  refreshExerciseOptions();
+  populateRoutineSelects();
+  populateLogFilters();
+  renderDashboardArea();
+  renderMoreArea();
+  renderSessionArea();
+  renderRoutinesArea();
+  renderLogsArea();
+  renderAnalyticsArea();
+  renderGoalsArea();
+}
+
+function refreshMeasurementDependentAreas() {
+  renderDashboardArea();
+  renderMeasurementsArea();
+  renderAnalyticsArea();
+  renderGoalsArea();
+}
+
+function refreshRoutineDependentAreas() {
+  refreshExerciseOptions();
+  populateRoutineSelects();
+  populateLogFilters();
+  renderDashboardArea();
+  renderMoreArea();
+  renderSessionArea();
+  renderRoutinesArea();
+  renderLogsArea();
+  renderAnalyticsArea();
+}
+
+function ensureMinimumData() {
+  if (!store.state.routines.length) {
+    store.state.routines = starterRoutines();
   }
-
-  return {
-    value: Number(top.weight || 0),
-    decision: "hold",
-    reason: lastRpe != null && lastRpe >= 9 ? "Mantén. El esfuerzo ya fue alto." : "Mantén y acumula repeticiones limpias antes de subir."
-  };
 }
 
-export function buildExerciseChartPoints(state, exerciseId, metric, aggregation = "day") {
-  if (!exerciseId) return [];
-  const rows = state.workouts.filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup);
-  const groups = groupBy(rows, (item) => {
-    if (aggregation === "reference") {
-      return item.sessionId ? `session|${item.sessionId}` : `manual|${item.id}`;
-    }
-    return item.date;
-  });
-
-  return Object.entries(groups)
-    .sort((a, b) => {
-      const firstA = a[1][0];
-      const firstB = b[1][0];
-      return String(firstA.date || "").localeCompare(String(firstB.date || ""))
-        || String(firstA.createdAt || "").localeCompare(String(firstB.createdAt || ""));
-    })
-    .slice(-12)
-    .map(([, logs]) => {
-      const anchor = [...logs].sort(sortByDateAsc)[0];
-      let value = 0;
-      if (metric === "weight") value = Math.max(...logs.map((item) => Number(item.weight || 0)));
-      if (metric === "e1rm") value = Math.max(...logs.map((item) => estimateE1RM(item.weight, item.reps)));
-      if (metric === "volume") value = logs.reduce((sum, item) => sum + calcVolume(item), 0);
-      if (metric === "reps") value = Math.max(...logs.map((item) => Number(item.reps || 0)));
-      return { label: shortLabel(anchor.date), value };
-    })
-    .filter((point) => Number.isFinite(point.value));
-}
-
-export function buildBodyChartPoints(state, metric) {
-  return state.measurements
-    .filter((item) => item[metric] !== "" && item[metric] != null)
-    .sort(sortByDateAsc)
-    .slice(-12)
-    .map((item) => ({ label: shortLabel(item.date), value: Number(item[metric]) }));
-}
-
-export function computeBestLiftMap(state) {
-  return state.workouts.reduce((acc, item) => {
-    if (item.isWarmup) return acc;
-    const key = item.exerciseId || item.exerciseKey || item.exercise;
-    const value = estimateE1RM(item.weight, item.reps);
-    if (!acc[key] || value > acc[key].e1rm) {
-      acc[key] = { value: Number(item.weight), e1rm: value, date: item.date, name: item.exercise };
-    }
-    return acc;
-  }, {});
-}
-
-export function computeFirstLiftMap(state) {
-  const map = {};
-  state.workouts.forEach((item) => {
-    if (item.isWarmup) return;
-    const key = item.exerciseId || item.exerciseKey || item.exercise;
-    const current = map[key];
-    if (!current || String(item.date).localeCompare(String(current.date)) < 0) {
-      map[key] = { value: Number(item.weight), date: item.date, name: item.exercise };
-    }
-  });
-  return map;
-}
-
-export function computeGoalProgress({ baseline, current, target }) {
-  if (current == null || target == null || target === "") return 0;
-  if (baseline == null || baseline === target) {
-    return clamp((current / Math.max(Number(target), 1)) * 100, 0, 100);
-  }
-  const totalDistance = Number(target) - Number(baseline);
-  const currentDistance = Number(current) - Number(baseline);
-  if (totalDistance === 0) return 100;
-  return clamp((currentDistance / totalDistance) * 100, 0, 100);
-}
-
-export function buildTrendItems(state) {
-  const workoutDates = getUniqueWorkoutDates(state);
-  const last7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-  const prev7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) > 6 && daysBetween(date, todayLocal()) <= 13).length;
-  const last30 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 29).length;
-  const weeklyVolume = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= 6).reduce((sum, item) => sum + calcVolume(item), 0);
-  const previousWeeklyVolume = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13).reduce((sum, item) => sum + calcVolume(item), 0);
-  const volumeDelta = weeklyVolume - previousWeeklyVolume;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
-  const previousMeasurement = [...state.measurements].sort(sortByDateDesc)[1];
-  const weightDelta = latestMeasurement?.bodyWeight !== "" && previousMeasurement?.bodyWeight !== ""
-    ? Number(latestMeasurement.bodyWeight || 0) - Number(previousMeasurement.bodyWeight || 0)
-    : null;
-
+function starterRoutines() {
   return [
     {
-      title: "Frecuencia reciente",
-      subtitle: `${last7} días entrenados en 7 días · ${last30} en 30 días.`,
-      chips: [{ label: `${last7 - prev7 >= 0 ? "+" : ""}${last7 - prev7} vs semana previa`, type: last7 >= prev7 ? "success" : "warning" }]
+      id: uid(),
+      name: "Torso A",
+      day: "Día A",
+      focus: "Hipertrofia controlada",
+      notes: "Bloque base",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      exercises: [
+        normalizeRoutineExercise({ id: uid(), block: "A1", name: "Press banca", sets: 4, reps: "6-8", rest: 120, notes: "Pausa 1s en pecho" }),
+        normalizeRoutineExercise({ id: uid(), block: "A2", name: "Remo con barra", sets: 4, reps: "8-10", rest: 90 }),
+        normalizeRoutineExercise({ id: uid(), block: "B", name: "Press militar", sets: 3, reps: "8-10", rest: 90 }),
+        normalizeRoutineExercise({ id: uid(), block: "C", name: "Fondos", sets: 3, reps: "8-12", rest: 75 })
+      ]
     },
     {
-      title: "Volumen semanal",
-      subtitle: `Llevas ${formatNumber(weeklyVolume)} kg.`,
-      chips: [{ label: `${volumeDelta >= 0 ? "+" : ""}${formatNumber(volumeDelta)} kg`, type: volumeDelta >= 0 ? "success" : "warning" }]
-    },
-    {
-      title: "Peso corporal",
-      subtitle: weightDelta == null ? "Aún no hay suficiente histórico para medir tendencia." : `${latestMeasurement?.bodyWeight ? `${formatNumber(latestMeasurement.bodyWeight)} kg actual` : "Sin dato actual"}`,
-      chips: [{ label: weightDelta == null ? "Sin delta" : `${weightDelta > 0 ? "+" : ""}${formatNumber(weightDelta)} kg`, type: weightDelta <= 0 ? "success" : "ghost" }]
-    },
-    {
-      title: "Continuidad",
-      subtitle: `Tu continuidad activa es de ${computeStreak(state)} días entrenados con margen real.`,
-      chips: [{ label: workoutDates[0] ? relativeDaysLabel(daysBetween(workoutDates[0], todayLocal())) : "Sin entrenos", type: "ghost" }]
+      id: uid(),
+      name: "Pierna B",
+      day: "Día B",
+      focus: "Fuerza + cadena posterior",
+      notes: "Prioridad básicos",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      exercises: [
+        normalizeRoutineExercise({ id: uid(), block: "A", name: "Sentadilla", sets: 4, reps: "5-6", rest: 150 }),
+        normalizeRoutineExercise({ id: uid(), block: "B", name: "Peso muerto rumano", sets: 3, reps: "8-10", rest: 120 }),
+        normalizeRoutineExercise({ id: uid(), block: "C1", name: "Prensa", sets: 3, reps: "10-12", rest: 90 }),
+        normalizeRoutineExercise({ id: uid(), block: "C2", name: "Plancha", sets: 3, reps: "30", rest: 45 })
+      ]
     }
   ];
 }
 
-export function detectPotentialStall(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
-  return Object.values(grouped)
-    .map((logs) => {
-      const recent = [...logs].sort(sortByDateAsc).slice(-5);
-      if (recent.length < 5) return null;
-      const slope = linearRegressionSlope(recent.map((item) => estimateE1RM(item.weight, item.reps)));
-      const daySpan = daysBetween(recent[0].date, recent[recent.length - 1].date);
-      if (daySpan < 14) return null;
-      if (Math.abs(slope) <= 0.35) {
-        const latest = recent[recent.length - 1];
-        return { exercise: latest.exercise, latest: estimateE1RM(latest.weight, latest.reps), slope, points: recent.length, date: latest.date };
-      }
-      return null;
-    })
-    .filter(Boolean)
-    .sort((a, b) => Math.abs(a.slope) - Math.abs(b.slope));
+function setDefaultDates() {
+  if (els.workoutForm.date) els.workoutForm.date.value = todayLocal();
+  if (els.measurementForm.date) els.measurementForm.date.value = todayLocal();
 }
 
-export function resolveGroupEntries(state, groupId) {
-  if (groupId.startsWith("manual|")) {
-    return { entryIds: [groupId.split("|")[1]], sessionId: "" };
-  }
-
-  if (groupId.startsWith("session|")) {
-    const [, sessionId, exerciseId] = groupId.split("|");
-    return {
-      sessionId,
-      entryIds: state.workouts
-        .filter((item) => item.sessionId === sessionId && (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId)
-        .map((item) => item.id)
-    };
-  }
-
-  return { entryIds: [], sessionId: "" };
+function startSessionFromSelect() {
+  const routineId = els.sessionRoutineSelect.value || selectedSessionRoutineId || "";
+  startRoutineById(routineId);
 }
 
-export function syncSessionHistoryEntry(state, sessionId) {
-  if (!sessionId) return;
-  const records = state.workouts.filter((item) => item.sessionId === sessionId);
-  const existingIndex = state.sessionHistory.findIndex((item) => item.sessionId === sessionId);
-
-  if (!records.length) {
-    if (existingIndex >= 0) state.sessionHistory.splice(existingIndex, 1);
+function startRoutineById(routineId) {
+  if (!routineId) {
+    toast(els, "Selecciona una rutina para iniciar sesión.");
+    return;
+  }
+  const routineExists = store.state.routines.some((item) => item.id === routineId);
+  if (!routineExists) {
+    selectedSessionRoutineId = "";
+    populateRoutineSelects();
+    toast(els, "La rutina seleccionada ya no existe. Elige otra desde Rutinas.");
     return;
   }
 
-  const existing = existingIndex >= 0 ? state.sessionHistory[existingIndex] : null;
-  const sorted = [...records].sort(sortByDateAsc);
-  const first = sorted[0];
-  const last = sorted[sorted.length - 1];
-  const nonWarmups = records.filter((item) => !item.isWarmup);
-  const routineName = state.routines.find((item) => item.id === (existing?.routineId || first.routineId))?.name || existing?.routineName || "";
+  selectedSessionRoutineId = routineId;
+  const result = beginSessionFromRoutine(store.state, routineId, window.confirm);
+  if (result.status === "started") {
+    stopRestTimer();
+    store.queueSave();
+    setActiveTab(store.state, "session");
+    requestWakeLock();
+    refreshWorkoutDependentAreas();
+  }
+  if (result.status === "existing") {
+    setActiveTab(store.state, "session");
+  }
+  if (result.message) toast(els, result.message);
+}
 
-  const entry = {
-    id: existing?.id || sessionId,
+async function handleEndSession() {
+  if (!store.state.session.active) {
+    toast(els, "No hay sesión activa.");
+    return;
+  }
+
+  if (!store.state.session.setEntries.length) {
+    const accepted = window.confirm("La sesión está vacía. ¿Quieres descartarla en lugar de cerrarla?");
+    if (accepted) handleDiscardSession(true);
+    return;
+  }
+
+  const working = store.state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+  const warmups = store.state.session.setEntries.filter((entry) => entry.isWarmup).length;
+  const completedExercises = new Set(store.state.session.setEntries.filter((entry) => !entry.isWarmup).map((entry) => entry.exerciseId)).size;
+  const durationLabel = formatDuration(getSessionDurationSeconds(store.state));
+  const sparseWarning = working < 3 || completedExercises < 2 ? "\n\n⚠️ Sesión muy corta: revisa si falta registrar series antes de cerrar." : "";
+  const summary = `Resumen previo:\n• ${working} series efectivas\n• ${warmups} warm-up\n• ${completedExercises} ejercicios trabajados\n• ${durationLabel} de duración${sparseWarning}`;
+  if (!window.confirm(`Se va a guardar y cerrar la sesión.\n\n${summary}\n\n¿Confirmar cierre?`)) return;
+
+  const result = endSession(store.state);
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  releaseWakeLock();
+  stopRestTimer();
+  refreshWorkoutDependentAreas();
+  renderMeasurementsArea();
+  renderSettingsArea();
+  toast(els, result.message);
+  await store.flushSave();
+}
+
+function handleDiscardSession(force = false) {
+  if (!store.state.session.active) {
+    toast(els, "No hay sesión activa.");
+    return;
+  }
+  const hasData = hasActiveSessionRisk(store.state);
+  if (!force) {
+    const message = hasData
+      ? "Vas a descartar la sesión activa y sus series temporales. Esta acción es destructiva. ¿Quieres continuar?"
+      : "La sesión está vacía. ¿Quieres descartarla?";
+    if (!window.confirm(message)) return;
+  }
+  discardActiveSession(store.state);
+  releaseWakeLock();
+  stopRestTimer();
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  toast(els, hasData ? "Sesión descartada." : "Sesión vacía descartada.");
+}
+
+function handleCopyLastSession() {
+  const result = copyLastSessionIntoActive(store.state, window.confirm);
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  toast(els, result.message);
+}
+
+function handleAddSessionSet(exerciseId) {
+  const weightInput = document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`);
+  const repsInput = document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`);
+  const rpeInput = document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`);
+  const restInput = document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`);
+  const warmupInput = document.querySelector(`#session-warmup-${CSS.escape(exerciseId)}`);
+
+  const result = addSessionSet(store.state, exerciseId, {
+    weight: Number(weightInput?.value),
+    reps: Number(repsInput?.value),
+    rpe: rpeInput?.value || "",
+    rest: Number(restInput?.value || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+    isWarmup: warmupInput?.checked || false
+  });
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+
+  if (rpeInput) rpeInput.value = "";
+  if (warmupInput) warmupInput.checked = false;
+
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  renderAnalyticsArea();
+  toast(els, result.message);
+  if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
+
+  window.requestAnimationFrame(() => {
+    const focusTargetId = result.currentExerciseCompleted && result.nextExerciseId && result.nextExerciseId !== exerciseId ? result.nextExerciseId : exerciseId;
+    document.querySelector(`#exercise-card-${CSS.escape(focusTargetId)}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    document.querySelector(`#session-weight-${CSS.escape(focusTargetId)}`)?.focus();
+    document.querySelector(`#session-weight-${CSS.escape(focusTargetId)}`)?.select();
+  });
+}
+
+function handleDeleteSessionSet(entryId) {
+  const result = deleteSessionSet(store.state, entryId);
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  renderAnalyticsArea();
+  toast(els, result.message, {
+    actionLabel: "Deshacer",
+    onAction: () => {
+      restoreLastDeletedSessionSet(store.state);
+      store.queueSave();
+      renderSessionArea();
+      renderDashboardArea();
+      renderAnalyticsArea();
+      toast(els, "Serie recuperada.");
+    }
+  });
+}
+
+function handleToggleSkipExercise(exerciseId) {
+  const result = toggleSkipExercise(store.state, exerciseId);
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  toast(els, result.message);
+}
+
+function fillLastReferenceValues(exerciseId) {
+  const routine = store.state.routines.find((item) => item.id === store.state.session.routineId);
+  const exercise = routine?.exercises.find((item) => item.id === exerciseId);
+  if (!exercise) return;
+  const ref = getExerciseReference(store.state, exercise.catalogId || exercise.exerciseKey || exercise.name, store.state.session.routineId)
+    || getExerciseReference(store.state, exercise.catalogId || exercise.exerciseKey || exercise.name);
+  if (!ref) {
+    toast(els, "No hay referencia previa para este ejercicio.");
+    return;
+  }
+  document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`).value = ref.weight;
+  document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = ref.reps;
+  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = ref.rest || exercise.rest || store.state.preferences.defaultRestSeconds;
+  toast(els, "Se han rellenado los valores de la última referencia.");
+}
+
+function repeatLastSessionSet(exerciseId) {
+  const last = getSessionEntriesByExercise(store.state, exerciseId).slice(-1)[0];
+  if (!last) {
+    toast(els, "Aún no hay una serie previa en esta sesión.");
+    return;
+  }
+  document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`).value = last.weight;
+  document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = last.reps;
+  document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = last.rest || store.state.preferences.defaultRestSeconds;
+  document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`).value = last.rpe === "" ? "" : last.rpe;
+  toast(els, "Se han copiado los valores de la última serie.");
+}
+
+function saveLastSessionSetAgain(exerciseId) {
+  const last = getSessionEntriesByExercise(store.state, exerciseId).slice(-1)[0];
+  if (!last) {
+    toast(els, "No hay una serie previa para duplicar.");
+    return;
+  }
+  const result = addSessionSet(store.state, exerciseId, {
+    weight: Number(last.weight),
+    reps: Number(last.reps),
+    rpe: last.rpe,
+    rest: Number(last.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+    isWarmup: Boolean(last.isWarmup)
+  });
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  renderAnalyticsArea();
+  toast(els, "Serie duplicada y guardada.");
+  if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
+}
+
+function prefillFromExistingSet(entryId) {
+  const entry = store.state.session.setEntries.find((item) => item.id === entryId);
+  if (!entry) return;
+  const exerciseId = entry.exerciseId;
+  const weightInput = document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`);
+  const repsInput = document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`);
+  const rpeInput = document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`);
+  const restInput = document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`);
+  const warmupInput = document.querySelector(`#session-warmup-${CSS.escape(exerciseId)}`);
+  if (weightInput) weightInput.value = entry.weight;
+  if (repsInput) repsInput.value = entry.reps;
+  if (rpeInput) rpeInput.value = entry.rpe === "" ? "" : entry.rpe;
+  if (restInput) restInput.value = entry.rest || store.state.preferences.defaultRestSeconds;
+  if (warmupInput) warmupInput.checked = Boolean(entry.isWarmup);
+  toast(els, "Serie cargada en el formulario rápido.");
+}
+
+function handleEditSessionSet(entryId) {
+  const entry = store.state.session.setEntries.find((item) => item.id === entryId);
+  if (!entry) {
+    toast(els, "No se encontró la serie para editar.");
+    return;
+  }
+  if (!els.sessionSetEditorDialog || !els.sessionSetEditorForm) return;
+  els.sessionSetEditorTitle.textContent = `Editar serie · ${entry.exerciseName || "Ejercicio"}`;
+  els.sessionSetEditorForm.entryId.value = entry.id;
+  els.sessionSetEditorForm.weight.value = entry.weight;
+  els.sessionSetEditorForm.reps.value = entry.reps;
+  els.sessionSetEditorForm.rpe.value = entry.rpe === "" ? "" : entry.rpe;
+  els.sessionSetEditorForm.rest.value = entry.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+  els.sessionSetEditorForm.isWarmup.checked = Boolean(entry.isWarmup);
+  els.sessionSetEditorDialog.showModal();
+}
+
+function saveSessionSetEditor(event) {
+  event.preventDefault();
+  const form = new FormData(els.sessionSetEditorForm);
+  const entryId = String(form.get("entryId") || "");
+  if (!entryId) return;
+  const result = updateSessionSet(store.state, entryId, {
+    weight: Number(form.get("weight")),
+    reps: Number(form.get("reps")),
+    rpe: form.get("rpe") === "" ? "" : Number(form.get("rpe")),
+    rest: Number(form.get("rest")),
+    isWarmup: form.get("isWarmup") === "on"
+  });
+  if (!result.ok) {
+    toast(els, result.message);
+    return;
+  }
+  els.sessionSetEditorDialog.close();
+  store.queueSave();
+  renderSessionArea();
+  renderDashboardArea();
+  renderAnalyticsArea();
+  toast(els, result.message);
+}
+
+function focusExerciseCard(exerciseId) {
+  if (!exerciseId) return;
+  const card = document.querySelector(`#exercise-card-${CSS.escape(exerciseId)}`);
+  if (!card) return;
+  if (card.tagName.toLowerCase() === "details") card.open = true;
+  card.scrollIntoView({ behavior: "smooth", block: "start" });
+  document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`)?.focus();
+}
+
+function jumpToNextExercise(fromExerciseId = "") {
+  const nextExerciseId = getNextSuggestedExerciseId(store.state, fromExerciseId || store.state.session.currentExerciseId);
+  if (!nextExerciseId) {
+    toast(els, "No hay más ejercicios pendientes.");
+    return;
+  }
+  focusExerciseCard(nextExerciseId);
+}
+
+function saveWorkoutFromForm(event) {
+  event.preventDefault();
+  const form = new FormData(els.workoutForm);
+  const editingId = store.state.ui.editingWorkoutId;
+  const previous = editingId ? store.state.workouts.find((item) => item.id === editingId) : null;
+  const meta = getExerciseMeta(form.get("exercise") || "");
+  const weight = Number(form.get("weight"));
+  const sets = Number(form.get("sets"));
+  const reps = Number(form.get("reps"));
+
+  if (!meta.name || !Number.isFinite(weight) || weight < 0 || !Number.isFinite(sets) || sets <= 0 || !Number.isFinite(reps) || reps <= 0) {
+    toast(els, "Completa ejercicio, peso válido (puede ser 0), series y reps.");
+    return;
+  }
+
+  const record = normalizeWorkoutRecord({
+    id: editingId || uid(),
+    date: form.get("date") || todayLocal(),
+    routineId: form.get("routineId") || "",
+    sessionId: "",
+    exercise: meta.name,
+    exerciseId: meta.id,
+    exerciseKey: meta.key,
+    muscleGroup: meta.muscleGroup,
+    movementPattern: meta.pattern,
+    weight,
+    sets,
+    reps,
+    rpe: optionalNumber(form.get("rpe"), { min: 1, max: 10 }),
+    rest: optionalNumber(form.get("rest"), { min: 0 }),
+    tempo: String(form.get("tempo") || "").trim(),
+    notes: String(form.get("notes") || "").trim(),
+    isWarmup: false,
+    source: "manual",
+    createdAt: previous?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  });
+
+  const index = store.state.workouts.findIndex((item) => item.id === record.id);
+  if (index >= 0) store.state.workouts[index] = record;
+  else store.state.workouts.push(record);
+
+  cancelWorkoutEdit();
+  store.queueSave();
+  refreshWorkoutDependentAreas();
+  toast(els, index >= 0 ? "Registro actualizado." : "Registro guardado.");
+}
+
+function editWorkout(id) {
+  const item = store.state.workouts.find((workout) => workout.id === id);
+  if (!item) return;
+  store.state.ui.editingWorkoutId = id;
+  els.cancelWorkoutEditBtn.hidden = false;
+  store.state.ui.sessionManualOpen = true;
+  els.manualWorkoutDetails.open = true;
+  els.workoutForm.date.value = item.date || todayLocal();
+  els.workoutForm.routineId.value = item.routineId || "";
+  els.workoutForm.exercise.value = item.exercise || "";
+  els.workoutForm.weight.value = item.weight ?? "";
+  els.workoutForm.sets.value = item.sets ?? "";
+  els.workoutForm.reps.value = item.reps ?? "";
+  els.workoutForm.rpe.value = item.rpe ?? "";
+  els.workoutForm.rest.value = item.rest ?? "";
+  els.workoutForm.tempo.value = item.tempo || "";
+  els.workoutForm.notes.value = item.notes || "";
+  setActiveTab(store.state, "session");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function cancelWorkoutEdit() {
+  store.state.ui.editingWorkoutId = "";
+  els.cancelWorkoutEditBtn.hidden = true;
+  els.workoutForm.reset();
+  setDefaultDates();
+}
+
+function saveRoutineFromForm(event) {
+  event.preventDefault();
+  const form = new FormData(els.routineForm);
+  const exercises = [...els.exerciseRows.querySelectorAll(".exercise-row")]
+    .map((row) => normalizeRoutineExercise({
+      id: row.dataset.id || uid(),
+      name: row.querySelector('[data-field="name"]').value.trim(),
+      sets: Number(row.querySelector('[data-field="sets"]').value || 0),
+      reps: row.querySelector('[data-field="reps"]').value.trim(),
+      rest: Number(row.querySelector('[data-field="rest"]').value || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+      block: row.querySelector('[data-field="block"]').value.trim(),
+      notes: row.querySelector('[data-field="notes"]').value.trim()
+    }))
+    .filter((item) => item.name);
+
+  const routineName = String(form.get("name") || "").trim();
+  if (!routineName || !exercises.length) {
+    toast(els, "Pon nombre a la rutina y al menos un ejercicio.");
+    return;
+  }
+  const invalidExercise = exercises.find((item) => Number(item.sets) <= 0 || !String(item.reps || "").trim());
+  if (invalidExercise) {
+    toast(els, "Revisa la rutina: cada ejercicio necesita series válidas y repeticiones.");
+    return;
+  }
+  const duplicateNames = exercises.map((item) => item.name.toLowerCase()).filter((name, idx, arr) => arr.indexOf(name) !== idx);
+  if (duplicateNames.length && !window.confirm("Hay ejercicios duplicados con el mismo nombre. ¿Quieres guardarla igualmente?")) {
+    return;
+  }
+
+  const editingRoutineId = store.state.ui.editingRoutineId || "";
+  const editingActiveSessionRoutine = Boolean(store.state.session.active && store.state.session.routineId && store.state.session.routineId === editingRoutineId);
+  const shouldForkActiveRoutine = editingActiveSessionRoutine;
+  const routine = {
+    id: shouldForkActiveRoutine ? uid() : (editingRoutineId || uid()),
+    name: routineName,
+    day: String(form.get("day") || "").trim(),
+    focus: String(form.get("focus") || "").trim(),
+    notes: String(form.get("notes") || "").trim(),
+    createdAt: store.state.routines.find((item) => item.id === editingRoutineId)?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    exercises
+  };
+
+  const index = shouldForkActiveRoutine ? -1 : store.state.routines.findIndex((item) => item.id === routine.id);
+  if (index >= 0) store.state.routines[index] = routine;
+  else store.state.routines.push(routine);
+
+  cancelRoutineEdit();
+  store.queueSave();
+  refreshRoutineDependentAreas();
+  const complexity = exercises.reduce((sum, item) => sum + Number(item.sets || 0), 0);
+  toast(els, shouldForkActiveRoutine
+    ? "Había una sesión activa con esta rutina. Se guardó como copia para proteger tu sesión actual."
+    : (index >= 0 ? `Rutina actualizada · ${complexity} series planificadas.` : `Rutina guardada · ${complexity} series planificadas.`));
+}
+
+function addExerciseRow(data = {}, afterRow = null) {
+  const fragment = els.exerciseRowTemplate.content.cloneNode(true);
+  const row = fragment.querySelector(".exercise-row");
+  row.dataset.id = data.id || uid();
+  row.querySelector('[data-field="block"]').value = data.block || "";
+  row.querySelector('[data-field="name"]').value = data.name || "";
+  row.querySelector('[data-field="sets"]').value = data.sets || "";
+  row.querySelector('[data-field="reps"]').value = data.reps || "";
+  row.querySelector('[data-field="rest"]').value = data.rest || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS;
+  row.querySelector('[data-field="notes"]').value = data.notes || "";
+  if (afterRow && afterRow.parentNode) {
+    afterRow.insertAdjacentElement("afterend", row);
+  } else {
+    els.exerciseRows.appendChild(row);
+  }
+}
+
+function duplicateRoutineRow(row) {
+  if (!row) return;
+  addExerciseRow({
+    block: row.querySelector('[data-field="block"]').value,
+    name: row.querySelector('[data-field="name"]').value,
+    sets: row.querySelector('[data-field="sets"]').value,
+    reps: row.querySelector('[data-field="reps"]').value,
+    rest: row.querySelector('[data-field="rest"]').value,
+    notes: row.querySelector('[data-field="notes"]').value
+  }, row);
+}
+
+function moveRoutineRow(row, direction) {
+  if (!row) return;
+  const rows = [...els.exerciseRows.querySelectorAll('.exercise-row')];
+  const index = rows.indexOf(row);
+  const targetIndex = index + direction;
+  if (index < 0 || targetIndex < 0 || targetIndex >= rows.length) return;
+  const moved = moveItem(rows, index, targetIndex);
+  els.exerciseRows.innerHTML = '';
+  moved.forEach((item) => els.exerciseRows.appendChild(item));
+}
+
+function editRoutine(id) {
+  const routine = store.state.routines.find((item) => item.id === id);
+  if (!routine) return;
+  store.state.ui.editingRoutineId = id;
+  els.cancelRoutineEditBtn.hidden = false;
+  els.routineForm.name.value = routine.name;
+  els.routineForm.day.value = routine.day || "";
+  els.routineForm.focus.value = routine.focus || "";
+  els.routineForm.notes.value = routine.notes || "";
+  els.exerciseRows.innerHTML = "";
+  routine.exercises.forEach((exercise) => addExerciseRow(exercise));
+  selectedSessionRoutineId = routine.id;
+  setActiveTab(store.state, "routines");
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
+function cancelRoutineEdit() {
+  store.state.ui.editingRoutineId = "";
+  els.cancelRoutineEditBtn.hidden = true;
+  els.routineForm.reset();
+  els.exerciseRows.innerHTML = "";
+  addExerciseRow();
+}
+
+function applyRoutineTemplate(templateId) {
+  const templates = {
+    push: { name: 'Push', focus: 'Pecho, hombro, tríceps', exercises: [
+      { block: 'A', name: 'Press banca', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'B', name: 'Press inclinado mancuernas', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'C', name: 'Press militar', sets: 3, reps: '6-10', rest: 90 },
+      { block: 'D', name: 'Extensión de tríceps polea', sets: 3, reps: '10-15', rest: 60 }
+    ]},
+    pull: { name: 'Pull', focus: 'Espalda y bíceps', exercises: [
+      { block: 'A', name: 'Dominadas', sets: 4, reps: '6-10', rest: 120 },
+      { block: 'B', name: 'Remo con barra', sets: 4, reps: '6-10', rest: 90 },
+      { block: 'C', name: 'Jalón al pecho', sets: 3, reps: '10-12', rest: 75 },
+      { block: 'D', name: 'Curl bíceps mancuernas', sets: 3, reps: '10-12', rest: 60 }
+    ]},
+    legs: { name: 'Legs', focus: 'Pierna completa', exercises: [
+      { block: 'A', name: 'Sentadilla', sets: 4, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Peso muerto rumano', sets: 3, reps: '8-10', rest: 120 },
+      { block: 'C', name: 'Prensa', sets: 3, reps: '10-12', rest: 90 },
+      { block: 'D', name: 'Curl femoral', sets: 3, reps: '10-15', rest: 75 }
+    ]},
+    upper: { name: 'Upper', focus: 'Torso equilibrado', exercises: [
+      { block: 'A1', name: 'Press banca', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'A2', name: 'Remo con barra', sets: 4, reps: '6-8', rest: 120 },
+      { block: 'B1', name: 'Press militar', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'B2', name: 'Jalón al pecho', sets: 3, reps: '8-12', rest: 90 }
+    ]},
+    lower: { name: 'Lower', focus: 'Pierna y core', exercises: [
+      { block: 'A', name: 'Sentadilla frontal', sets: 4, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Zancadas', sets: 3, reps: '10-12', rest: 90 },
+      { block: 'C', name: 'Hip thrust', sets: 4, reps: '8-12', rest: 90 },
+      { block: 'D', name: 'Plancha', sets: 3, reps: '30-45', rest: 45 }
+    ]},
+    full: { name: 'Full Body', focus: 'Compuestos base', exercises: [
+      { block: 'A', name: 'Sentadilla', sets: 3, reps: '5-8', rest: 150 },
+      { block: 'B', name: 'Press banca', sets: 3, reps: '6-10', rest: 120 },
+      { block: 'C', name: 'Remo con barra', sets: 3, reps: '8-10', rest: 90 },
+      { block: 'D', name: 'Peso muerto rumano', sets: 3, reps: '8-10', rest: 120 }
+    ]}
+  };
+  const template = templates[templateId];
+  if (!template) return;
+  if (els.exerciseRows.querySelector('.exercise-row [data-field="name"]')?.value.trim() && !window.confirm('Se reemplazarán los ejercicios del formulario actual. ¿Continuar?')) {
+    return;
+  }
+  els.exerciseRows.innerHTML = '';
+  template.exercises.forEach((exercise) => addExerciseRow(exercise));
+  if (!els.routineForm.name.value.trim()) els.routineForm.name.value = template.name;
+  if (!els.routineForm.focus.value.trim()) els.routineForm.focus.value = template.focus;
+  toast(els, `Plantilla ${template.name} aplicada.`);
+}
+
+function duplicateRoutine(id) {
+  const routine = store.state.routines.find((item) => item.id === id);
+  if (!routine) return;
+  const clone = safeClone(routine);
+  clone.id = uid();
+  clone.name = `${routine.name} copia`;
+  clone.createdAt = new Date().toISOString();
+  clone.updatedAt = new Date().toISOString();
+  clone.exercises = clone.exercises.map((exercise) => ({ ...exercise, id: uid() }));
+  store.state.routines.push(clone);
+  store.queueSave();
+  refreshRoutineDependentAreas();
+  toast(els, "Rutina duplicada.");
+}
+
+function deleteRoutine(id) {
+  const routine = store.state.routines.find((item) => item.id === id);
+  if (!routine) return;
+
+  const isActiveRoutine = store.state.session.active && store.state.session.routineId === id;
+  if (isActiveRoutine && (store.state.session.setEntries.length || store.state.session.notes.trim())) {
+    toast(els, "No puedes eliminar esta rutina mientras su sesión activa tenga datos. Cierra o descarta la sesión primero.");
+    return;
+  }
+
+  const exerciseCount = routine.exercises?.length || 0;
+  const confirmMessage = `Vas a eliminar "${routine.name}" (${exerciseCount} ejercicios). Se puede deshacer desde el aviso inmediato. ¿Continuar?`;
+  if (!window.confirm(confirmMessage)) return;
+
+  const removedRoutine = safeClone(routine);
+  const removedSessionSnapshot = isActiveRoutine ? safeClone(store.state.session) : null;
+  store.state.routines = store.state.routines.filter((item) => item.id !== id);
+
+  if (isActiveRoutine) {
+    discardActiveSession(store.state);
+    releaseWakeLock();
+    stopRestTimer();
+  }
+
+  if (store.state.ui.editingRoutineId === id) cancelRoutineEdit();
+  selectedSessionRoutineId = store.state.routines[0]?.id || "";
+  store.queueSave();
+  refreshRoutineDependentAreas();
+  renderSessionArea();
+
+  toast(els, `Rutina "${removedRoutine.name}" eliminada.`, {
+    actionLabel: 'Deshacer',
+    onAction: () => {
+      store.state.routines.push(removedRoutine);
+      if (removedSessionSnapshot) store.state.session = removedSessionSnapshot;
+      selectedSessionRoutineId = removedRoutine.id;
+      store.queueSave();
+      refreshRoutineDependentAreas();
+      renderSessionArea();
+      if (removedSessionSnapshot?.active && store.state.preferences.keepScreenAwake) requestWakeLock();
+      toast(els, 'Rutina recuperada.');
+    }
+  });
+}
+
+function openHistoryGroupEditor(groupId) {
+  const { entryIds, sessionId } = resolveGroupEntries(store.state, groupId);
+  const entries = store.state.workouts.filter((item) => entryIds.includes(item.id)).sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  if (!entries.length) return;
+  editingEntriesContext = { entryIds, sessionId, mode: 'group', allowSetEditing: true };
+  els.groupEditorTitle.textContent = `Corregir bloque: ${entries[0].exercise}`;
+  els.groupEditorContent.innerHTML = buildEditorRows(entries);
+  els.groupEditorDialog.showModal();
+}
+
+function openSessionHistoryEditor(sessionId) {
+  const entries = store.state.workouts.filter((item) => item.sessionId === sessionId).sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
+  if (!entries.length) return;
+  editingEntriesContext = { entryIds: entries.map((item) => item.id), sessionId, mode: 'session', allowSetEditing: false };
+  els.groupEditorTitle.textContent = `Corregir sesión completa`;
+  els.groupEditorContent.innerHTML = buildEditorRows(entries, true);
+  els.groupEditorDialog.showModal();
+}
+
+function buildEditorRows(entries, includeExercise = false) {
+  const allowSetEditing = Boolean(editingEntriesContext?.allowSetEditing);
+  return `
+    <div class="editor-grid">
+      ${entries.map((entry, index) => `
+        <section class="editor-row" data-entry-id="${entry.id}">
+          <div class="editor-row-head">
+            <strong>Serie ${index + 1}</strong>
+            ${includeExercise ? `<span class="chip ghost">${entry.exercise}</span>` : ''}
+          </div>
+          <div class="editor-row-grid">
+            <label>Kg<input name="weight" type="number" min="0" step="0.5" value="${entry.weight}"></label>
+            ${allowSetEditing
+              ? `<label>Series<input name="sets" type="number" min="1" step="1" value="${entry.sets}"></label>`
+              : `<label>Series<input name="sets" type="number" min="1" step="1" value="1" disabled></label>`}
+            <label>Reps<input name="reps" type="number" min="1" step="1" value="${entry.reps}"></label>
+            <label>RPE<input name="rpe" type="number" min="1" max="10" step="0.5" value="${entry.rpe === '' ? '' : entry.rpe}"></label>
+            <label>Descanso<input name="rest" type="number" min="0" step="15" value="${entry.rest === '' ? '' : entry.rest}"></label>
+            <label>Notas<textarea name="notes">${entry.notes || ''}</textarea></label>
+          </div>
+        </section>
+      `).join('')}
+    </div>
+  `;
+}
+
+function saveEditedHistoryEntries(event) {
+  event.preventDefault();
+  if (!editingEntriesContext) return;
+  const blocks = [...els.groupEditorContent.querySelectorAll('.editor-row')];
+  for (const block of blocks) {
+    const entryId = block.dataset.entryId;
+    const entry = store.state.workouts.find((item) => item.id === entryId);
+    if (!entry) continue;
+    const weight = Number(block.querySelector('[name="weight"]').value);
+    const sets = editingEntriesContext.allowSetEditing ? Number(block.querySelector('[name="sets"]').value) : 1;
+    const reps = Number(block.querySelector('[name="reps"]').value);
+    if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(sets) || sets <= 0 || !Number.isFinite(reps) || reps <= 0) {
+      toast(els, 'Revisa peso, series y repeticiones.');
+      return;
+    }
+    entry.weight = weight;
+    entry.sets = sets;
+    entry.reps = reps;
+    entry.rpe = optionalNumber(block.querySelector('[name="rpe"]').value, { min: 1, max: 10 });
+    entry.rest = optionalNumber(block.querySelector('[name="rest"]').value, { min: 0 });
+    entry.notes = block.querySelector('[name="notes"]').value.trim();
+    entry.updatedAt = new Date().toISOString();
+  }
+  if (editingEntriesContext.sessionId) syncSessionHistoryEntry(store.state, editingEntriesContext.sessionId);
+  els.groupEditorDialog.close();
+  editingEntriesContext = null;
+  store.queueSave();
+  refreshWorkoutDependentAreas();
+  toast(els, 'Histórico corregido.');
+}
+
+function deleteWorkoutGroup(groupId) {
+  if (!window.confirm('¿Borrar este bloque de entrenamiento?')) return;
+  const { entryIds, sessionId } = resolveGroupEntries(store.state, groupId);
+  const removed = store.state.workouts.filter((item) => entryIds.includes(item.id));
+  store.state.workouts = store.state.workouts.filter((item) => !entryIds.includes(item.id));
+  if (sessionId) syncSessionHistoryEntry(store.state, sessionId);
+  store.queueSave();
+  refreshWorkoutDependentAreas();
+  toast(els, 'Bloque borrado.', {
+    actionLabel: 'Deshacer',
+    onAction: () => {
+      store.state.workouts.push(...removed);
+      if (sessionId) syncSessionHistoryEntry(store.state, sessionId);
+      store.queueSave();
+      refreshWorkoutDependentAreas();
+      toast(els, 'Bloque recuperado.');
+    }
+  });
+}
+
+function deleteSessionHistory(sessionId) {
+  if (!window.confirm('¿Borrar toda esta sesión del histórico?')) return;
+  const removedWorkouts = store.state.workouts.filter((item) => item.sessionId === sessionId);
+  const removedSession = store.state.sessionHistory.find((item) => item.sessionId === sessionId);
+  store.state.workouts = store.state.workouts.filter((item) => item.sessionId !== sessionId);
+  store.state.sessionHistory = store.state.sessionHistory.filter((item) => item.sessionId !== sessionId);
+  store.queueSave();
+  refreshWorkoutDependentAreas();
+  toast(els, 'Sesión borrada.', {
+    actionLabel: 'Deshacer',
+    onAction: () => {
+      store.state.workouts.push(...removedWorkouts);
+      if (removedSession) store.state.sessionHistory.push(removedSession);
+      store.queueSave();
+      refreshWorkoutDependentAreas();
+      toast(els, 'Sesión recuperada.');
+    }
+  });
+}
+
+function saveMeasurementFromForm(event) {
+  event.preventDefault();
+  const form = new FormData(els.measurementForm);
+  const editingId = store.state.ui.editingMeasurementId;
+  const previous = editingId ? store.state.measurements.find((item) => item.id === editingId) : null;
+  const record = {
+    id: editingId || uid(),
+    date: form.get('date') || todayLocal(),
+    bodyWeight: numOrBlank(form.get('bodyWeight')),
+    bodyFat: numOrBlank(form.get('bodyFat')),
+    waist: numOrBlank(form.get('waist')),
+    chest: numOrBlank(form.get('chest')),
+    arm: numOrBlank(form.get('arm')),
+    thigh: numOrBlank(form.get('thigh')),
+    hips: numOrBlank(form.get('hips')),
+    neck: numOrBlank(form.get('neck')),
+    sleepHours: numOrBlank(form.get('sleepHours')),
+    notes: String(form.get('notes') || '').trim(),
+    createdAt: previous?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  const hasMetric = Object.entries(record).some(([key, value]) => !['id', 'date', 'notes', 'createdAt', 'updatedAt'].includes(key) && value !== '');
+  if (!hasMetric) {
+    toast(els, 'Añade al menos una métrica corporal.');
+    return;
+  }
+  const index = store.state.measurements.findIndex((item) => item.id === record.id);
+  if (index >= 0) store.state.measurements[index] = record;
+  else store.state.measurements.push(record);
+  cancelMeasurementEdit();
+  store.queueSave();
+  refreshMeasurementDependentAreas();
+  toast(els, index >= 0 ? 'Medición actualizada.' : 'Medición guardada.');
+}
+
+function editMeasurement(id) {
+  const item = store.state.measurements.find((measurement) => measurement.id === id);
+  if (!item) return;
+  store.state.ui.editingMeasurementId = id;
+  els.cancelMeasurementEditBtn.hidden = false;
+  Object.entries(item).forEach(([key, value]) => {
+    if (els.measurementForm[key]) els.measurementForm[key].value = value ?? '';
+  });
+  setActiveTab(store.state, 'measurements');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function cancelMeasurementEdit() {
+  store.state.ui.editingMeasurementId = '';
+  els.cancelMeasurementEditBtn.hidden = true;
+  els.measurementForm.reset();
+  setDefaultDates();
+}
+
+function deleteMeasurement(id) {
+  if (!window.confirm('¿Borrar esta medición?')) return;
+  const removed = store.state.measurements.find((item) => item.id === id);
+  store.state.measurements = store.state.measurements.filter((item) => item.id !== id);
+  store.queueSave();
+  refreshMeasurementDependentAreas();
+  toast(els, 'Medición borrada.', {
+    actionLabel: 'Deshacer',
+    onAction: () => {
+      if (removed) store.state.measurements.push(removed);
+      store.queueSave();
+      refreshMeasurementDependentAreas();
+      toast(els, 'Medición recuperada.');
+    }
+  });
+}
+
+function saveGoals(event) {
+  event.preventDefault();
+  const form = new FormData(els.goalForm);
+  store.state.goals.athleteName = String(form.get('athleteName') || '').trim();
+  store.state.goals.focusGoal = String(form.get('focusGoal') || '').trim();
+  store.state.goals.goalDate = String(form.get('goalDate') || '').trim();
+  ['bodyWeight', 'waist', 'bodyFat', 'bench', 'squat', 'deadlift'].forEach((key) => {
+    store.state.goals.resultGoals[key] = form.get(key) || '';
+  });
+  ['workoutsPerWeek', 'sleepHours', 'measureEveryDays', 'minimumStreakDays'].forEach((key) => {
+    store.state.goals.habits[key] = form.get(key) || '';
+  });
+  store.queueSave();
+  renderGoalsArea();
+  renderAnalyticsArea();
+  toast(els, 'Objetivos guardados.');
+}
+
+function savePreferences(event) {
+  event.preventDefault();
+  store.state.preferences.units = 'metric';
+  store.state.preferences.defaultRestSeconds = Number(els.preferencesForm.defaultRestSeconds.value || FALLBACK_REST_SECONDS);
+  store.state.preferences.suggestionIncrement = Number(els.preferencesForm.suggestionIncrement.value || 2.5);
+  store.state.preferences.autoStartRest = els.preferencesForm.autoStartRest.checked;
+  store.state.preferences.keepScreenAwake = els.preferencesForm.keepScreenAwake.checked;
+  store.state.preferences.showWarmupsInLogs = els.preferencesForm.showWarmupsInLogs.checked;
+  store.state.preferences.enableVibration = els.preferencesForm.enableVibration.checked;
+  store.state.preferences.collapseManualLog = els.preferencesForm.collapseManualLog.checked;
+  if (!store.state.preferences.keepScreenAwake) releaseWakeLock();
+  else if (store.state.session.active) requestWakeLock();
+  store.queueSave();
+  renderSessionArea();
+  renderLogsArea();
+  renderSettingsArea();
+  toast(els, 'Preferencias guardadas.');
+}
+
+function updateNetworkStatus() {
+  const online = navigator.onLine;
+  els.networkBadge.textContent = online ? 'Online' : 'Offline';
+  els.networkBadge.classList.toggle('offline', !online);
+  els.networkBadge.dataset.online = online ? 'true' : 'false';
+  els.networkBadge.dataset.quiet = online ? 'true' : 'false';
+}
+
+
+async function requestWakeLock() {
+  try {
+    if (!("wakeLock" in navigator) || !store.state.preferences.keepScreenAwake || !store.state.session.active) return;
+    wakeLock = await navigator.wakeLock.request('screen');
+  } catch (error) {
+    console.warn('Wake Lock no disponible', error);
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) {
+    wakeLock.release().catch(() => {});
+    wakeLock = null;
+  }
+}
+
+function prepareForFullStateReplacement() {
+  releaseWakeLock();
+  stopRestTimer();
+}
+
+function syncToastOffsetFromBottomNav() {
+  const tabbar = document.querySelector(".tabbar");
+  const isMobile = window.matchMedia?.("(max-width: 760px)")?.matches;
+  const reserved = isMobile ? Math.ceil(tabbar?.getBoundingClientRect?.().height || 0) + 16 : 0;
+  els.toastRegion?.style.setProperty("--tabbar-reserved", `${reserved}px`);
+}
+
+function startRestTimer(seconds) {
+  const total = Number(seconds || 0);
+  if (total <= 0) return;
+  store.state.session.restTimerEndsAt = new Date(Date.now() + total * 1000).toISOString();
+  updateRestTimerLabel();
+  store.queueSave();
+}
+
+function stopRestTimer() {
+  store.state.session.restTimerEndsAt = '';
+  updateRestTimerLabel();
+  store.queueSave();
+}
+
+function updateRestTimerLabel() {
+  const remaining = getRestRemainingSeconds();
+  const minutes = String(Math.floor(remaining / 60)).padStart(2, '0');
+  const seconds = String(remaining % 60).padStart(2, '0');
+  els.restTimerLabel.textContent = `${minutes}:${seconds}`;
+  els.restTimerLabel.closest('.rest-timer')?.classList.toggle('active', remaining > 0);
+}
+
+function getRestRemainingSeconds() {
+  if (!store.state.session.restTimerEndsAt) return 0;
+  const endsAt = new Date(store.state.session.restTimerEndsAt).getTime();
+  return Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+}
+
+function startTickers() {
+  clearInterval(tickInterval);
+  tickInterval = setInterval(() => {
+    if (store?.state.session.active) {
+      els.sessionDurationLabel.textContent = formatDuration(getSessionDurationSeconds(store.state));
+      const effectiveVolume = store.state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+      els.sessionVolumeLabel.textContent = `${formatNumber(effectiveVolume)} kg`;
+    }
+    const before = getRestRemainingSeconds();
+    updateRestTimerLabel();
+    const after = getRestRemainingSeconds();
+    if (before > 0 && after === 0) {
+      if (store.state.preferences.enableVibration && navigator.vibrate) navigator.vibrate([120, 80, 120]);
+      toast(els, 'Descanso terminado.');
+      store.state.session.restTimerEndsAt = '';
+      store.queueSave();
+    }
+  }, 1000);
+}
+
+async function confirmSafeStateReplacement(actionLabel) {
+  const risky = hasActiveSessionRisk(store.state);
+  if (!risky) return true;
+  const message = `Hay una sesión activa con series o notas temporales. Si continúas con "${actionLabel}", perderás esa sesión en progreso. ¿Quieres continuar?`;
+  const accepted = window.confirm(message);
+  if (!accepted) {
+    toast(els, "Acción cancelada para proteger la sesión activa.");
+    return false;
+  }
+  return true;
+}
+
+async function loadDemoData() {
+  if (!await confirmSafeStateReplacement("Cargar demo")) return;
+  if ((store.state.workouts.length || store.state.measurements.length || store.state.sessionHistory.length) && !window.confirm('Ya hay datos. ¿Quieres reemplazarlos con la demo?')) {
+    return;
+  }
+  const routineA = {
+    id: uid(),
+    name: 'Upper Strength',
+    day: 'Lunes',
+    focus: 'Fuerza torso',
+    notes: 'Bloque principal',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    exercises: [
+      normalizeRoutineExercise({ id: uid(), block: 'A1', name: 'Press banca', sets: 4, reps: '5', rest: 150 }),
+      normalizeRoutineExercise({ id: uid(), block: 'A2', name: 'Dominadas lastradas', sets: 4, reps: '6', rest: 120 }),
+      normalizeRoutineExercise({ id: uid(), block: 'B', name: 'Press militar', sets: 3, reps: '6-8', rest: 90 })
+    ]
+  };
+  const routineB = {
+    id: uid(),
+    name: 'Lower Power',
+    day: 'Jueves',
+    focus: 'Pierna',
+    notes: 'Foco en básicos',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    exercises: [
+      normalizeRoutineExercise({ id: uid(), block: 'A', name: 'Sentadilla', sets: 4, reps: '5', rest: 150 }),
+      normalizeRoutineExercise({ id: uid(), block: 'B', name: 'Peso muerto rumano', sets: 3, reps: '8', rest: 120 }),
+      normalizeRoutineExercise({ id: uid(), block: 'C1', name: 'Prensa', sets: 3, reps: '10', rest: 90 }),
+      normalizeRoutineExercise({ id: uid(), block: 'C2', name: 'Plancha', sets: 3, reps: '30', rest: 45 })
+    ]
+  };
+  const newState = defaultState();
+  newState.routines = [routineA, routineB];
+  const session1 = uid();
+  const session2 = uid();
+  newState.workouts = [
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Press banca', 80, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Press banca', 80, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Press banca', 77.5, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Dominadas lastradas', 15, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Dominadas lastradas', 15, 1, 6),
+    workoutDemo(offsetDate(todayLocal(), -1), routineA.id, session1, 'Press militar', 45, 1, 8),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, 'Sentadilla', 110, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, 'Sentadilla', 110, 1, 5),
+    workoutDemo(offsetDate(todayLocal(), -5), routineB.id, session2, 'Prensa', 180, 1, 10),
+    workoutDemo(offsetDate(todayLocal(), -8), routineA.id, '', 'Flexiones', 0, 4, 12, 'manual')
+  ];
+  newState.measurements = [
+    measurementDemo(todayLocal(), 81.2, 14.4, 82.5, 104, 39.2, 59.5, 97.5, 38.2, 7.2),
+    measurementDemo(offsetDate(todayLocal(), -14), 81.9, 14.9, 83.1, 103.6, 39.0, 59.2, 97.9, 38.1, 7.0),
+    measurementDemo(offsetDate(todayLocal(), -30), 82.8, 15.6, 84.0, 103.0, 38.4, 58.8, 98.5, 38.0, 6.7)
+  ];
+  newState.sessionHistory = [
+    { id: uid(), sessionId: session1, routineId: routineA.id, routineName: routineA.name, date: offsetDate(todayLocal(), -1), startedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -1), '18:00'), endedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -1), '19:08'), durationSeconds: 68 * 60, totalSets: 6, exercisesCompleted: 3, volume: 1375, notes: '' },
+    { id: uid(), sessionId: session2, routineId: routineB.id, routineName: routineB.name, date: offsetDate(todayLocal(), -5), startedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -5), '19:00'), endedAt: isoFromLocalDateTime(offsetDate(todayLocal(), -5), '20:04'), durationSeconds: 64 * 60, totalSets: 3, exercisesCompleted: 2, volume: 2000, notes: '' }
+  ];
+  newState.goals = {
+    athleteName: 'Javier',
+    focusGoal: 'Subir fuerza manteniendo cintura controlada',
+    goalDate: offsetDate(todayLocal(), 90),
+    resultGoals: { bodyWeight: 79, waist: 80, bodyFat: 12, bench: 100, squat: 140, deadlift: 160 },
+    habits: { workoutsPerWeek: 4, sleepHours: 7.5, measureEveryDays: 14, minimumStreakDays: 3 }
+  };
+  prepareForFullStateReplacement();
+  store.state = newState;
+  ensureMinimumData();
+  syncAllSessionHistory(store.state);
+  cancelRoutineEdit();
+  cancelWorkoutEdit();
+  cancelMeasurementEdit();
+  refreshAll();
+  store.queueSave();
+  toast(els, 'Demo cargada.');
+}
+
+function workoutDemo(date, routineId, sessionId, exercise, weight, sets, reps, source = 'session') {
+  const createdAt = isoFromLocalDateTime(date, '19:00');
+  return normalizeWorkoutRecord({
+    id: uid(),
+    date,
+    routineId,
     sessionId,
-    routineId: existing?.routineId || first.routineId || "",
-    routineName,
-    date: existing?.date || first.date,
-    startedAt: existing?.startedAt || first.createdAt || "",
-    endedAt: existing?.endedAt || last.updatedAt || last.createdAt || "",
-    durationSeconds: existing?.durationSeconds || 0,
-    totalSets: records.length,
-    workingSets: nonWarmups.length,
-    warmupSets: records.length - nonWarmups.length,
-    exercisesCompleted: uniq(nonWarmups.map((item) => item.exerciseId || item.exerciseKey || item.exercise)).length,
-    volume: nonWarmups.reduce((sum, item) => sum + calcVolume(item), 0),
-    notes: existing?.notes || ""
-  };
+    exercise,
+    weight,
+    sets,
+    reps,
+    rpe: '',
+    rest: 90,
+    tempo: '',
+    notes: 'Demo',
+    isWarmup: false,
+    source,
+    createdAt,
+    updatedAt: createdAt
+  });
+}
 
-  if (!entry.durationSeconds && entry.startedAt && entry.endedAt) {
-    const diff = Math.max(0, Math.floor((new Date(entry.endedAt).getTime() - new Date(entry.startedAt).getTime()) / 1000));
-    entry.durationSeconds = diff;
+function measurementDemo(date, bodyWeight, bodyFat, waist, chest, arm, thigh, hips, neck, sleepHours) {
+  const createdAt = isoFromLocalDateTime(date, '08:00');
+  return { id: uid(), date, bodyWeight, bodyFat, waist, chest, arm, thigh, hips, neck, sleepHours, notes: 'Demo', createdAt, updatedAt: createdAt };
+}
+
+async function resetAllData() {
+  if (!await confirmSafeStateReplacement("Resetear todos los datos")) return;
+  if (!window.confirm('¿Seguro que quieres borrar todos los datos?')) return;
+  prepareForFullStateReplacement();
+  store.state = defaultState();
+  ensureMinimumData();
+  cancelRoutineEdit();
+  cancelWorkoutEdit();
+  cancelMeasurementEdit();
+  refreshAll();
+  store.queueSave();
+  toast(els, 'Datos reiniciados.');
+}
+
+function exportJson() {
+  const blob = new Blob([JSON.stringify(store.state, null, 2)], { type: 'application/json' });
+  downloadBlob(blob, `gymflow-pro-backup-${todayLocal()}.json`);
+}
+
+function exportCsv() {
+  const workoutsCsv = toCsv(store.state.workouts, ['date', 'routineId', 'sessionId', 'exercise', 'exerciseId', 'weight', 'sets', 'reps', 'rpe', 'rest', 'isWarmup', 'source', 'notes']);
+  const measurementsCsv = toCsv(store.state.measurements, ['date', 'bodyWeight', 'bodyFat', 'waist', 'chest', 'arm', 'thigh', 'hips', 'neck', 'sleepHours', 'notes']);
+  const sessionsCsv = toCsv(store.state.sessionHistory, ['date', 'routineName', 'durationSeconds', 'totalSets', 'exercisesCompleted', 'volume', 'notes']);
+  downloadBlob(new Blob([workoutsCsv], { type: 'text/csv;charset=utf-8' }), `gymflow-workouts-${todayLocal()}.csv`);
+  downloadBlob(new Blob([measurementsCsv], { type: 'text/csv;charset=utf-8' }), `gymflow-measurements-${todayLocal()}.csv`);
+  downloadBlob(new Blob([sessionsCsv], { type: 'text/csv;charset=utf-8' }), `gymflow-sessions-${todayLocal()}.csv`);
+}
+
+async function importJson(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  if (!await confirmSafeStateReplacement("Importar JSON")) {
+    event.target.value = "";
+    return;
   }
-
-  if (existingIndex >= 0) state.sessionHistory[existingIndex] = entry;
-  else state.sessionHistory.push(entry);
-}
-
-export function syncAllSessionHistory(state) {
-  const sessionIds = uniq(state.workouts.filter((item) => item.sessionId).map((item) => item.sessionId).concat(state.sessionHistory.map((item) => item.sessionId)));
-  sessionIds.forEach((sessionId) => syncSessionHistoryEntry(state, sessionId));
-}
-
-export function buildHistoryFeed(state) {
-  const normalizeSearch = (value) => normalizeNameForMatch(value);
-  const filters = {
-    query: normalizeSearch(String(state.ui.logSearch || "")),
-    routine: state.ui.logRoutine || "all",
-    muscle: state.ui.logMuscle || "all",
-    source: state.ui.logSource || "all",
-    datePreset: state.ui.logDatePreset || "all"
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      prepareForFullStateReplacement();
+      store.state = migrateState(JSON.parse(String(reader.result)));
+      ensureMinimumData();
+      syncAllSessionHistory(store.state);
+      cancelRoutineEdit();
+      cancelWorkoutEdit();
+      cancelMeasurementEdit();
+      refreshAll();
+      await store.flushSave();
+      toast(els, 'Datos importados.');
+    } catch (error) {
+      console.error(error);
+      toast(els, 'El archivo no es válido.');
+    } finally {
+      els.importInput.value = '';
+    }
   };
-
-  const sessionItems = [...state.sessionHistory].map((session) => {
-    const entries = state.workouts.filter((item) => item.sessionId === session.sessionId);
-    const effectiveEntries = entries.filter((item) => !item.isWarmup);
-    const exercises = buildSessionExerciseSummaries(state, session.sessionId);
-    return {
-      kind: "session",
-      id: session.sessionId,
-      date: session.date,
-      title: session.routineName || "Sesión",
-      routineId: session.routineId,
-      routineName: session.routineName,
-      source: "session",
-      muscleGroups: uniq(effectiveEntries.map((item) => item.muscleGroup).filter(Boolean)),
-      searchText: normalizeSearch(`${session.routineName} ${exercises.map((item) => item.exercise).join(" ")}`),
-      durationSeconds: session.durationSeconds,
-      totalSets: session.totalSets,
-      workingSets: session.workingSets ?? session.totalSets,
-      warmupSets: session.warmupSets ?? 0,
-      volume: session.volume,
-      exercisesCompleted: session.exercisesCompleted,
-      exercises,
-      sessionId: session.sessionId,
-      notes: session.notes || "",
-      sortAnchor: session.endedAt || session.startedAt || `${session.date}T00:00:00`
-    };
-  });
-
-  const manualItems = buildWorkoutGroups(state, { includeWarmups: state.preferences.showWarmupsInLogs })
-    .filter((group) => !group.sessionId)
-    .map((group) => ({
-      kind: "manual",
-      id: group.groupId,
-      date: group.date,
-      title: group.exercise,
-      routineId: group.routineId,
-      routineName: group.routineName,
-      source: "manual",
-      muscleGroups: group.muscleGroup ? [group.muscleGroup] : [],
-      searchText: normalizeSearch(`${group.exercise} ${group.routineName}`),
-      setCount: group.setCount,
-      maxWeight: group.maxWeight,
-      volume: group.volume,
-      bestE1rm: group.bestE1rm,
-      repsLabel: group.repsLabel,
-      groupId: group.groupId,
-      entries: group.entries,
-      notes: group.entries.map((entry) => String(entry.notes || "").trim()).find(Boolean) || "",
-      sortAnchor: group.latestCreatedAt || `${group.date}T00:00:00`
-    }));
-
-  const items = [...sessionItems, ...manualItems]
-    .filter((item) => {
-      const matchesQuery = !filters.query || item.searchText.includes(filters.query);
-      const matchesRoutine = filters.routine === "all" || item.routineId === filters.routine;
-      const matchesMuscle = filters.muscle === "all" || item.muscleGroups.includes(filters.muscle);
-      const matchesSource = filters.source === "all" || item.source === filters.source;
-      const diff = daysBetween(item.date, todayLocal());
-      const matchesDate = filters.datePreset === "all"
-        || (filters.datePreset === "7d" && diff >= 0 && diff <= 6)
-        || (filters.datePreset === "30d" && diff >= 0 && diff <= 29)
-        || (filters.datePreset === "90d" && diff >= 0 && diff <= 89);
-      return matchesQuery && matchesRoutine && matchesMuscle && matchesSource && matchesDate;
-    });
-
-  const sortBy = state.ui.logSort || "date_desc";
-  items.sort((a, b) => {
-    if (sortBy === "date_asc") {
-      return getChronologicalAnchor(a) - getChronologicalAnchor(b);
-    }
-    if (sortBy === "weight_desc") {
-      const weightA = a.kind === "session" ? Math.max(0, ...(a.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(a.maxWeight || 0);
-      const weightB = b.kind === "session" ? Math.max(0, ...(b.exercises || []).map((item) => Number(item.maxWeight || 0))) : Number(b.maxWeight || 0);
-      return weightB - weightA || getChronologicalAnchor(b) - getChronologicalAnchor(a);
-    }
-    if (sortBy === "exercise_asc") {
-      return String(a.title || "").localeCompare(String(b.title || ""), "es") || getChronologicalAnchor(b) - getChronologicalAnchor(a);
-    }
-    return getChronologicalAnchor(b) - getChronologicalAnchor(a);
-  });
-
-  return items;
-}
-
-export function buildPrItems(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
-
-  return Object.values(grouped)
-    .map((logs) => {
-      const ordered = [...logs].sort(sortByDateAsc);
-      const latest = ordered[ordered.length - 1];
-      const bestWeight = ordered.reduce((best, item) => Number(item.weight) > Number(best.weight) ? item : best, ordered[0]);
-      const bestE1rm = ordered.reduce((best, item) => estimateE1RM(item.weight, item.reps) > estimateE1RM(best.weight, best.reps) ? item : best, ordered[0]);
-      const previousBestE1rm = ordered.filter((item) => item.id !== bestE1rm.id).reduce((best, item) => !best || estimateE1RM(item.weight, item.reps) > estimateE1RM(best.weight, best.reps) ? item : best, null);
-      return {
-        exercise: ordered[0].exercise,
-        exerciseId: ordered[0].exerciseId || ordered[0].exerciseKey || ordered[0].exercise,
-        bestWeight,
-        bestE1rm,
-        previousBestE1rm,
-        latest,
-        deltaVsPrevBest: previousBestE1rm ? estimateE1RM(bestE1rm.weight, bestE1rm.reps) - estimateE1RM(previousBestE1rm.weight, previousBestE1rm.reps) : estimateE1RM(bestE1rm.weight, bestE1rm.reps)
-      };
-    })
-    .sort((a, b) => estimateE1RM(b.bestE1rm.weight, b.bestE1rm.reps) - estimateE1RM(a.bestE1rm.weight, a.bestE1rm.reps));
-}
-
-export function buildMeasurementRows(state) {
-  const measurements = [...state.measurements].sort(sortByDateDesc);
-  return measurements.map((item, index) => {
-    const previous = measurements[index + 1] || null;
-    const delta = (metric) => {
-      if (!previous || item[metric] === "" || previous[metric] === "" || item[metric] == null || previous[metric] == null) return null;
-      return Number(item[metric]) - Number(previous[metric]);
-    };
-    return {
-      ...item,
-      deltaBodyWeight: delta("bodyWeight"),
-      deltaWaist: delta("waist"),
-      deltaBodyFat: delta("bodyFat"),
-      deltaSleepHours: delta("sleepHours")
-    };
-  });
-}
-
-export function buildWeeklyVolumeSeries(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => startOfWeek(item.date));
-  return Object.entries(grouped)
-    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    .slice(-8)
-    .map(([date, logs]) => ({ label: weekLabel(date), value: logs.reduce((sum, item) => sum + calcVolume(item), 0) }));
-}
-
-export function buildWeeklyFrequencySeries(state) {
-  const grouped = groupBy(getUniqueWorkoutDates(state), (date) => startOfWeek(date));
-  return Object.entries(grouped)
-    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    .slice(-8)
-    .map(([date, days]) => ({ label: weekLabel(date), value: days.length }));
-}
-
-export function buildMonthlyVolumeSeries(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => String(item.date).slice(0, 7));
-  return Object.entries(grouped)
-    .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
-    .slice(-6)
-    .map(([month, logs]) => ({ label: monthLabel(`${month}-01`), value: logs.reduce((sum, item) => sum + calcVolume(item), 0) }));
-}
-
-export function buildMuscleDistribution(state, windowDays = 30) {
-  const recent = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= windowDays - 1);
-  const grouped = groupBy(recent, (item) => item.muscleGroup || "Sin grupo");
-  return Object.entries(grouped)
-    .map(([label, logs]) => ({ label, value: logs.reduce((sum, item) => sum + calcVolume(item), 0), sets: logs.length }))
-    .sort((a, b) => b.value - a.value);
-}
-
-export function computeAdherence(state) {
-  const habits = state.goals.habits || {};
-  const last7 = getUniqueWorkoutDates(state).filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0] || null;
-  const previousMeasurement = [...state.measurements].sort(sortByDateDesc)[1] || null;
-  const lastGap = latestMeasurement ? daysBetween(latestMeasurement.date, todayLocal()) : null;
-  const sleep = latestMeasurement?.sleepHours === "" || latestMeasurement?.sleepHours == null ? null : Number(latestMeasurement.sleepHours);
-  return {
-    workoutsPerWeek: {
-      target: habits.workoutsPerWeek === "" ? null : Number(habits.workoutsPerWeek),
-      current: last7
-    },
-    sleepHours: {
-      target: habits.sleepHours === "" ? null : Number(habits.sleepHours),
-      current: sleep
-    },
-    measureEveryDays: {
-      target: habits.measureEveryDays === "" ? null : Number(habits.measureEveryDays),
-      current: lastGap == null ? null : lastGap
-    },
-    minimumStreakDays: {
-      target: habits.minimumStreakDays === "" ? null : Number(habits.minimumStreakDays),
-      current: computeStreak(state)
-    },
-    measurementDeltaWeight: latestMeasurement && previousMeasurement && latestMeasurement.bodyWeight !== "" && previousMeasurement.bodyWeight !== ""
-      ? Number(latestMeasurement.bodyWeight) - Number(previousMeasurement.bodyWeight)
-      : null
-  };
-}
-
-function getChronologicalAnchor(item) {
-  const iso = item?.sortAnchor || item?.endedAt || item?.latestCreatedAt || item?.createdAt || item?.startedAt || (item?.date ? `${item.date}T00:00:00` : "");
-  const millis = Date.parse(iso);
-  if (Number.isFinite(millis)) return millis;
-  if (item?.date) {
-    const dateMillis = Date.parse(`${item.date}T00:00:00`);
-    return Number.isFinite(dateMillis) ? dateMillis : 0;
-  }
-  return 0;
+  reader.readAsText(file);
 }

@@ -1,112 +1,915 @@
-import { slugify, titleCase } from "./utils.js";
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#6d5efc" />
+    <meta name="description" content="GymFlow Pro: seguimiento de gimnasio offline-first con sesión activa robusta, histórico coherente y analítica fiable." />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="GymFlow Pro" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <link rel="icon" href="icons/icon-192.png" sizes="192x192" />
+    <link rel="apple-touch-icon" href="icons/icon-192.png" />
+    <title>GymFlow Pro</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="appShell">
+      <a class="skip-link" href="#mainContent">Saltar al contenido principal</a>
 
-export const EXERCISE_CATALOG = [
-  { id: "bench-press", name: "Press banca", aliases: ["press de banca", "banca", "bench press"], muscleGroup: "Pecho", pattern: "Empuje horizontal" },
-  { id: "incline-bench-press", name: "Press banca inclinado", aliases: ["press inclinado", "incline bench press"], muscleGroup: "Pecho", pattern: "Empuje inclinado" },
-  { id: "dumbbell-press", name: "Press mancuernas", aliases: ["press con mancuernas", "db press", "dumbbell press"], muscleGroup: "Pecho", pattern: "Empuje horizontal" },
-  { id: "barbell-row", name: "Remo con barra", aliases: ["remo barra", "barbell row"], muscleGroup: "Espalda", pattern: "Tracción horizontal" },
-  { id: "seated-row", name: "Remo en polea", aliases: ["remo polea", "seated row", "cable row"], muscleGroup: "Espalda", pattern: "Tracción horizontal" },
-  { id: "overhead-press", name: "Press militar", aliases: ["militar", "shoulder press", "overhead press"], muscleGroup: "Hombro", pattern: "Empuje vertical" },
-  { id: "lateral-raise", name: "Elevaciones laterales", aliases: ["laterales", "lateral raise"], muscleGroup: "Hombro", pattern: "Aislamiento hombro" },
-  { id: "squat", name: "Sentadilla", aliases: ["back squat", "squat"], muscleGroup: "Pierna", pattern: "Dominante de rodilla" },
-  { id: "front-squat", name: "Sentadilla frontal", aliases: ["front squat"], muscleGroup: "Pierna", pattern: "Dominante de rodilla" },
-  { id: "deadlift", name: "Peso muerto", aliases: ["deadlift"], muscleGroup: "Cadena posterior", pattern: "Bisagra de cadera" },
-  { id: "romanian-deadlift", name: "Peso muerto rumano", aliases: ["rumano", "rdl", "romanian deadlift"], muscleGroup: "Cadena posterior", pattern: "Bisagra de cadera" },
-  { id: "leg-press", name: "Prensa", aliases: ["leg press", "prensa de pierna"], muscleGroup: "Pierna", pattern: "Dominante de rodilla" },
-  { id: "weighted-pull-up", name: "Dominadas lastradas", aliases: ["dominada lastrada", "weighted pull up", "weighted pull-up"], muscleGroup: "Espalda", pattern: "Tracción vertical" },
-  { id: "pull-up", name: "Dominadas", aliases: ["pull up", "pull-up"], muscleGroup: "Espalda", pattern: "Tracción vertical" },
-  { id: "lat-pulldown", name: "Jalón al pecho", aliases: ["jalon al pecho", "lat pulldown", "jalón"], muscleGroup: "Espalda", pattern: "Tracción vertical" },
-  { id: "dip", name: "Fondos", aliases: ["dips", "fondos paralelas"], muscleGroup: "Pecho", pattern: "Empuje vertical" },
-  { id: "push-up", name: "Flexiones", aliases: ["push up", "push-up", "lagartijas"], muscleGroup: "Pecho", pattern: "Empuje horizontal" },
-  { id: "plank", name: "Plancha", aliases: ["plank"], muscleGroup: "Core", pattern: "Anti extensión" },
-  { id: "hip-thrust", name: "Hip thrust", aliases: ["glute bridge", "hip thrust"], muscleGroup: "Glúteo", pattern: "Extensión de cadera" },
-  { id: "biceps-curl", name: "Curl bíceps", aliases: ["curl biceps", "bicep curl"], muscleGroup: "Brazo", pattern: "Flexión de codo" },
-  { id: "triceps-pushdown", name: "Extensión tríceps polea", aliases: ["triceps pushdown", "jalón tríceps"], muscleGroup: "Brazo", pattern: "Extensión de codo" }
-];
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">GymFlow Pro · offline-first</p>
+          <h1>GymFlow Pro</h1>
+          <p class="subtitle">Rápida para entrenar, robusta para guardar y clara para decidir qué toca hoy.</p>
+        </div>
 
-const EXERCISE_BY_SLUG = new Map();
-for (const item of EXERCISE_CATALOG) {
-  EXERCISE_BY_SLUG.set(slugify(item.name), item);
-  item.aliases.forEach((alias) => EXERCISE_BY_SLUG.set(slugify(alias), item));
-}
+        <div class="topbar-actions topbar-actions--compact">
+          <span id="saveStatusBadge" class="status-badge status-badge--save" data-state="saved" aria-live="polite">Guardado</span>
+          <span id="networkBadge" class="status-badge" aria-live="polite">Online</span>
+        </div>
+      </header>
 
-export function getExerciseMeta(rawName) {
-  const cleaned = String(rawName ?? "").trim().replace(/\s+/g, " ");
-  if (!cleaned) {
-    return { id: "", name: "", muscleGroup: "", pattern: "", isCatalogMatch: false, key: "" };
-  }
+      <section class="hero-card hero-card--highlight" id="dashboardPrimaryCard"></section>
 
-  const match = EXERCISE_BY_SLUG.get(slugify(cleaned));
-  if (match) {
-    return { ...match, isCatalogMatch: true, key: match.id };
-  }
+      <section id="updateBanner" class="update-banner" hidden>
+        <div>
+          <strong>Hay una versión nueva lista para aplicar.</strong>
+          <p>La actualización se activará de forma predecible cuando pulses el botón.</p>
+        </div>
+        <button id="refreshAppBtn">Actualizar</button>
+      </section>
 
-  const normalizedName = titleCase(cleaned);
-  return {
-    id: `custom-${slugify(normalizedName)}`,
-    name: normalizedName,
-    muscleGroup: "",
-    pattern: "",
-    isCatalogMatch: false,
-    key: slugify(normalizedName)
-  };
-}
+      <section class="stats-grid four" aria-label="Resumen rápido">
+        <article class="stat-card accent-card">
+          <p>Días entrenados este mes</p>
+          <strong id="statSessionsMonth">0</strong>
+          <span>Frecuencia real</span>
+        </article>
+        <article class="stat-card">
+          <p>Continuidad</p>
+          <strong id="statStreak">0</strong>
+          <span>Días con inercia activa</span>
+        </article>
+        <article class="stat-card">
+          <p>Peso actual</p>
+          <strong id="statWeight">—</strong>
+          <span>Última medición</span>
+        </article>
+        <article class="stat-card">
+          <p>PR principal</p>
+          <strong id="statBestLift">—</strong>
+          <span id="statBestLiftLabel">Sin datos</span>
+        </article>
+        <article class="stat-card">
+          <p>e1RM top</p>
+          <strong id="statBestE1rm">—</strong>
+          <span id="statBestE1rmLabel">Estimado</span>
+        </article>
+      </section>
 
-export function normalizeWorkoutRecord(raw) {
-  const meta = getExerciseMeta(raw.exercise || raw.exerciseName || raw.name || "");
-  return {
-    ...raw,
-    exercise: meta.name,
-    exerciseId: raw.exerciseId || meta.id,
-    exerciseKey: raw.exerciseKey || meta.key,
-    muscleGroup: raw.muscleGroup || meta.muscleGroup || "",
-    movementPattern: raw.movementPattern || meta.pattern || "",
-    source: raw.source || (raw.sessionId ? "session" : "manual")
-  };
-}
+      <nav class="tabbar" aria-label="Secciones principales">
+        <div class="tabbar-inner" role="tablist" aria-label="Navegación principal">
+          <button class="tab active" id="tab-dashboard" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="dashboard" tabindex="0">Hoy</button>
+          <button class="tab" id="tab-session" data-tab="session" role="tab" aria-selected="false" aria-controls="session" tabindex="-1">Sesión</button>
+          <button class="tab" id="tab-logs" data-tab="logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1">Historial</button>
+          <button class="tab" id="tab-more" data-tab="more" role="tab" aria-selected="false" aria-controls="more" tabindex="-1">Más</button>
+        </div>
+      </nav>
 
-export function normalizeRoutineExercise(raw) {
-  const meta = getExerciseMeta(raw.name || "");
-  return {
-    id: raw.id,
-    name: meta.name,
-    catalogId: raw.catalogId || meta.id,
-    exerciseKey: raw.exerciseKey || meta.key,
-    muscleGroup: raw.muscleGroup || meta.muscleGroup || "",
-    movementPattern: raw.movementPattern || meta.pattern || "",
-    sets: Number(raw.sets || 0),
-    reps: String(raw.reps || "").trim(),
-    rest: Number(raw.rest || 0),
-    block: String(raw.block || "").trim().toUpperCase(),
-    notes: String(raw.notes || "").trim(),
-    createdAt: raw.createdAt || ""
-  };
-}
+      <main id="mainContent" class="layout">
+        <section id="dashboard" class="tab-panel active" role="tabpanel" aria-labelledby="tab-dashboard">
+          <div class="panel-grid two">
+            <article class="card card--emphasis">
+              <div class="card-head">
+                <div>
+                  <h2>Lanzador rápido</h2>
+                  <p>Acciones inmediatas para entrenar, medir o retomar sin pensar.</p>
+                </div>
+              </div>
+              <div id="recommendedRoutine" class="list compact"></div>
+            </article>
 
-export function collectExerciseOptions({ workouts = [], routines = [] } = {}) {
-  const merged = new Map();
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Señales rápidas</h2>
+                  <p>Frecuencia, volumen y riesgo de estancamiento en lectura ejecutiva.</p>
+                </div>
+              </div>
+              <div id="quickSignals" class="list compact"></div>
+            </article>
+          </div>
 
-  EXERCISE_CATALOG.forEach((item) => merged.set(item.id, { name: item.name, id: item.id, muscleGroup: item.muscleGroup }));
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head card-head-stack-mobile">
+                <div>
+                  <h2>Progresión de ejercicio</h2>
+                  <p>Selecciona el ejercicio que quieres vigilar.</p>
+                </div>
+                <div class="toolbar-inline">
+                  <div>
+                    <label class="sr-only" for="dashboardExerciseSelect">Elegir ejercicio</label>
+                    <select id="dashboardExerciseSelect"></select>
+                  </div>
+                  <div>
+                    <label class="sr-only" for="dashboardExerciseMetricSelect">Elegir métrica del ejercicio</label>
+                    <select id="dashboardExerciseMetricSelect">
+                      <option value="weight">Carga</option>
+                      <option value="e1rm">e1RM</option>
+                      <option value="volume">Volumen</option>
+                      <option value="reps">Reps</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label class="sr-only" for="chartAggregationSelect">Agrupación del gráfico</label>
+                    <select id="chartAggregationSelect">
+                      <option value="day">Agrupar por día</option>
+                      <option value="reference">Agrupar por sesión/ref</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+              <div id="exerciseChart" class="chart"></div>
+            </article>
 
-  workouts.forEach((item) => {
-    const meta = getExerciseMeta(item.exercise || item.exerciseName);
-    if (meta.name) merged.set(meta.id, { name: meta.name, id: meta.id, muscleGroup: meta.muscleGroup || item.muscleGroup || "" });
-  });
+            <article class="card">
+              <div class="card-head card-head-stack-mobile">
+                <div>
+                  <h2>Evolución corporal</h2>
+                  <p>Lectura limpia para peso, cintura, grasa o sueño.</p>
+                </div>
+                <div>
+                  <label class="sr-only" for="dashboardMetricSelect">Elegir métrica corporal</label>
+                  <select id="dashboardMetricSelect">
+                    <option value="bodyWeight">Peso</option>
+                    <option value="bodyFat">Grasa %</option>
+                    <option value="waist">Cintura</option>
+                    <option value="chest">Pecho</option>
+                    <option value="arm">Brazo</option>
+                    <option value="thigh">Pierna</option>
+                    <option value="hips">Cadera</option>
+                    <option value="sleepHours">Sueño</option>
+                  </select>
+                </div>
+              </div>
+              <div id="bodyChart" class="chart"></div>
+            </article>
+          </div>
 
-  routines.forEach((routine) => {
-    (routine.exercises || []).forEach((item) => {
-      const meta = getExerciseMeta(item.name);
-      if (meta.name) merged.set(meta.id, { name: meta.name, id: meta.id, muscleGroup: meta.muscleGroup || item.muscleGroup || "" });
-    });
-  });
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <h2>Actividad reciente</h2>
+                <p>Ahora se entiende mejor cuándo fue una sesión completa y cuándo fue un registro aislado.</p>
+              </div>
+            </div>
+            <div id="recentStory" class="list compact"></div>
+          </article>
+        </section>
 
-  return [...merged.values()].sort((a, b) => a.name.localeCompare(b.name, "es"));
-}
+        <section id="session" class="tab-panel" role="tabpanel" aria-labelledby="tab-session" hidden>
+          <div class="session-shell">
+            <article class="card card--emphasis session-main-card">
+              <div class="card-head">
+                <div>
+                  <h2>Sesión activa</h2>
+                  <p>Centro del producto. Autocompletado por series, omitir manual, edición con deshacer y flujo rápido serie a serie.</p>
+                </div>
+              </div>
 
-export function getMuscleGroupOptions({ workouts = [], routines = [] } = {}) {
-  const groups = new Set();
-  EXERCISE_CATALOG.forEach((item) => item.muscleGroup && groups.add(item.muscleGroup));
-  workouts.forEach((item) => item.muscleGroup && groups.add(item.muscleGroup));
-  routines.forEach((routine) => (routine.exercises || []).forEach((item) => item.muscleGroup && groups.add(item.muscleGroup)));
-  return [...groups].sort((a, b) => a.localeCompare(b, "es"));
-}
+              <div class="session-header-controls">
+                <label class="sr-only" for="sessionRoutineSelect">Selecciona una rutina</label>
+                <select id="sessionRoutineSelect"></select>
+                <div class="session-actions-row">
+                  <button id="startSessionBtn">Iniciar sesión</button>
+                  <button id="copyLastSessionBtn" class="ghost">Copiar última</button>
+                  <button id="endSessionBtn" class="ghost">Cerrar y guardar</button>
+                </div>
+                <div class="danger-zone-inline">
+                  <button id="discardSessionBtn" class="ghost danger-ghost" type="button">Descartar sesión activa</button>
+                </div>
+              </div>
+
+              <div class="session-summary-grid">
+                <div class="kpi">
+                  <p>Estado</p>
+                  <strong id="sessionStatusLabel">Sin sesión</strong>
+                </div>
+                <div class="kpi">
+                  <p>Duración</p>
+                  <strong id="sessionDurationLabel">00:00</strong>
+                </div>
+                <div class="kpi">
+                  <p>Volumen</p>
+                  <strong id="sessionVolumeLabel">0 kg</strong>
+                </div>
+              </div>
+
+              <div class="form-field session-note-field">
+                <label for="sessionNotes">Notas rápidas</label>
+                <textarea id="sessionNotes" placeholder="Sensaciones, molestias, cues, cambios..."></textarea>
+              </div>
+
+              <div id="activeSessionCard" class="active-session"></div>
+            </article>
+
+            <aside class="session-side-column">
+              <article class="card rest-card">
+                <div class="card-head">
+                  <div>
+                    <h2>Descanso</h2>
+                    <p>Siempre visible y listo para volver a arrancar.</p>
+                  </div>
+                </div>
+                <div class="rest-timer" aria-live="polite">
+                  <div>
+                    <p class="eyebrow-dark">Temporizador</p>
+                    <strong id="restTimerLabel">00:00</strong>
+                  </div>
+                  <div class="session-actions-row">
+                    <button id="startRestBtn" class="ghost small">Iniciar</button>
+                    <button id="stopRestBtn" class="ghost small">Parar</button>
+                  </div>
+                </div>
+              </article>
+
+              <details id="manualWorkoutDetails" class="details-panel details-panel--large">
+                <summary>Registro manual secundario</summary>
+                <div class="details-body">
+                  <p class="details-lead">Úsalo solo cuando quieras registrar un bloque suelto. La sesión activa sigue siendo la protagonista.</p>
+                  <form id="workoutForm" class="form-grid">
+                    <div class="form-field">
+                      <label for="workoutDate">Fecha</label>
+                      <input id="workoutDate" name="date" type="date" required />
+                    </div>
+                    <div class="form-field">
+                      <label for="workoutRoutineSelect">Rutina</label>
+                      <select name="routineId" id="workoutRoutineSelect"></select>
+                    </div>
+                    <div class="form-field">
+                      <label for="workoutExercise">Ejercicio</label>
+                      <input id="workoutExercise" name="exercise" list="exerciseSuggestions" placeholder="Ejercicio" required />
+                      <datalist id="exerciseSuggestions"></datalist>
+                    </div>
+                    <div class="mini-grid">
+                      <div class="form-field">
+                        <label for="workoutWeight">Peso</label>
+                        <input id="workoutWeight" name="weight" type="number" step="0.5" min="0" inputmode="decimal" placeholder="Kg" required />
+                      </div>
+                      <div class="form-field">
+                        <label for="workoutSets">Series</label>
+                        <input id="workoutSets" name="sets" type="number" step="1" min="1" inputmode="numeric" placeholder="Series" required />
+                      </div>
+                      <div class="form-field">
+                        <label for="workoutReps">Reps</label>
+                        <input id="workoutReps" name="reps" type="number" step="1" min="1" inputmode="numeric" placeholder="Reps" required />
+                      </div>
+                    </div>
+                    <details class="details-panel">
+                      <summary>Más datos opcionales</summary>
+                      <div class="form-grid details-body">
+                        <div class="mini-grid">
+                          <div class="form-field">
+                            <label for="workoutRpe">RPE</label>
+                            <input id="workoutRpe" name="rpe" type="number" min="1" max="10" step="0.5" inputmode="decimal" placeholder="RPE" />
+                          </div>
+                          <div class="form-field">
+                            <label for="workoutRest">Descanso</label>
+                            <input id="workoutRest" name="rest" type="number" min="0" step="15" inputmode="numeric" placeholder="Segundos" />
+                          </div>
+                          <div class="form-field">
+                            <label for="workoutTempo">Tempo</label>
+                            <input id="workoutTempo" name="tempo" placeholder="3-1-1" />
+                          </div>
+                        </div>
+                        <div class="form-field">
+                          <label for="workoutNotes">Notas</label>
+                          <textarea id="workoutNotes" name="notes" placeholder="Notas del entrenamiento"></textarea>
+                        </div>
+                      </div>
+                    </details>
+                    <div class="session-actions-row">
+                      <button type="submit">Guardar registro</button>
+                      <button type="button" id="cancelWorkoutEditBtn" class="ghost" hidden>Cancelar edición</button>
+                    </div>
+                  </form>
+                </div>
+              </details>
+            </aside>
+          </div>
+        </section>
+
+
+        <section id="more" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <article class="card">
+            <div class="card-head">
+              <div>
+                <h2>Centro de utilidades</h2>
+                <p>Planifica, revisa progreso y gestiona el sistema sin salir del flujo principal.</p>
+              </div>
+            </div>
+            <div class="more-last" id="moreLastSection" hidden>
+              <p class="helper-line">Última sección usada</p>
+              <button class="ghost" id="moreLastSectionBtn" data-action="open-last-more-section">Volver a —</button>
+            </div>
+            <div class="more-grid more-grid--cards">
+              <button class="ghost more-link" data-action="open-tab" data-id="routines"><strong>📋 Rutinas</strong><span>Construir, ordenar y lanzar sesiones</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="measurements"><strong>📏 Medidas</strong><span>Peso, cintura, grasa y tendencias</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="analytics"><strong>📈 Evolución</strong><span>Frecuencia, volumen, estancamientos</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="goals"><strong>🎯 Objetivos</strong><span>Resultados y hábitos en ritmo</span></button>
+              <button class="ghost more-link" data-action="open-tab" data-id="settings"><strong>🛡️ Ajustes y datos</strong><span>Copia, importación, PWA y seguridad</span></button>
+            </div>
+          </article>
+        </section>
+        <section id="routines" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Rutinas</span></div>
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Constructor de rutinas</h2>
+                  <p>Reordenación, duplicado, añadir debajo y bloques A1/A2 para superseries ligeras.</p>
+                </div>
+              </div>
+              <form id="routineForm" class="form-grid">
+                <div class="form-field">
+                  <label for="routineName">Nombre de la rutina</label>
+                  <input id="routineName" name="name" placeholder="Nombre de la rutina" required />
+                </div>
+                <div class="mini-grid two-columns">
+                  <div class="form-field">
+                    <label for="routineDay">Día o bloque</label>
+                    <input id="routineDay" name="day" placeholder="Lunes / Día A / Push..." />
+                  </div>
+                  <div class="form-field">
+                    <label for="routineFocus">Enfoque</label>
+                    <input id="routineFocus" name="focus" placeholder="Fuerza, hipertrofia, técnica..." />
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="routineNotes">Notas</label>
+                  <textarea id="routineNotes" name="notes" placeholder="Notas de la rutina"></textarea>
+                </div>
+                <div class="exercise-builder">
+                  <div class="exercise-builder-head">
+                    <h3>Ejercicios</h3>
+                    <button type="button" id="addExerciseRowBtn" class="ghost small">Añadir ejercicio</button>
+                  </div>
+                  <div class="template-row" aria-label="Plantillas rápidas">
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="push">Push</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="pull">Pull</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="legs">Legs</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="upper">Upper</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="lower">Lower</button>
+                    <button type="button" class="ghost small" data-action="apply-routine-template" data-id="full">Full Body</button>
+                  </div>
+                  <div id="exerciseRows"></div>
+                </div>
+                <div class="session-actions-row">
+                  <button type="submit">Guardar rutina</button>
+                  <button type="button" id="cancelRoutineEditBtn" class="ghost" hidden>Cancelar edición</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Tus rutinas</h2>
+                  <p>Con metadatos para decidir rápido cuál te conviene hoy.</p>
+                </div>
+              </div>
+              <div class="toolbar-grid routine-library-toolbar">
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="routineSearchInput">Buscar rutina</label>
+                  <input id="routineSearchInput" placeholder="Buscar rutina o ejercicio" />
+                </div>
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="routineDayFilter">Filtrar por día</label>
+                  <select id="routineDayFilter">
+                    <option value="all">Todos los días / bloques</option>
+                  </select>
+                </div>
+              </div>
+              <p id="routineFilterSummary" class="helper-line log-filter-summary"></p>
+              <div id="routineList" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="logs" class="tab-panel" role="tabpanel" aria-labelledby="tab-logs" hidden>
+          <div class="panel-grid two logs-layout">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Historial de entrenamiento</h2>
+                  <p>La sesión completa tiene prioridad y los registros manuales quedan diferenciados.</p>
+                </div>
+              </div>
+              <div class="logs-toolbar-head">
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="logSearchInput">Buscar</label>
+                  <input id="logSearchInput" placeholder="Buscar por rutina o ejercicio" />
+                </div>
+                <button id="toggleLogFiltersBtn" class="ghost" type="button" aria-expanded="false" aria-controls="logFiltersPanel">Filtros</button>
+              </div>
+              <details id="logFiltersPanel" class="details-panel logs-filters-panel">
+                <summary>Opciones de filtrado y orden</summary>
+                <div class="toolbar-grid logs-toolbar logs-toolbar--wide details-body">
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logRoutineFilter">Filtrar por rutina</label>
+                    <select id="logRoutineFilter"></select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logMuscleFilter">Grupo muscular</label>
+                    <select id="logMuscleFilter">
+                      <option value="all">Todos los grupos</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logSourceFilter">Origen</label>
+                    <select id="logSourceFilter">
+                      <option value="all">Todo</option>
+                      <option value="session">Sesión</option>
+                      <option value="manual">Manual</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logDatePresetFilter">Fecha</label>
+                    <select id="logDatePresetFilter">
+                      <option value="all">Todo el histórico</option>
+                      <option value="7d">Últimos 7 días</option>
+                      <option value="30d">Últimos 30 días</option>
+                      <option value="90d">Últimos 90 días</option>
+                    </select>
+                  </div>
+                  <div class="form-field compact-field">
+                    <label class="sr-only" for="logSortSelect">Ordenar</label>
+                    <select id="logSortSelect">
+                      <option value="date_desc">Más recientes</option>
+                      <option value="date_asc">Más antiguos</option>
+                      <option value="weight_desc">Más peso</option>
+                      <option value="exercise_asc">Ejercicio A-Z</option>
+                    </select>
+                  </div>
+                </div>
+              </details>
+              <p id="logFilterSummary" class="helper-line log-filter-summary"></p>
+              <div id="workoutList" class="list"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>PRs con contexto</h2>
+                  <p>Recencia, comparación con el PR anterior y más utilidad que una cifra aislada.</p>
+                </div>
+              </div>
+              <div id="prList" class="list compact"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="measurements" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Medidas</span></div>
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Registrar medidas</h2>
+                  <p>Primero lo importante: peso, cintura, grasa y sueño. El resto queda como apoyo.</p>
+                </div>
+              </div>
+              <form id="measurementForm" class="form-grid">
+                <div class="form-field">
+                  <label for="measurementDate">Fecha</label>
+                  <input id="measurementDate" name="date" type="date" required />
+                </div>
+                <div class="mini-grid">
+                  <div class="form-field">
+                    <label for="measurementWeight">Peso</label>
+                    <input id="measurementWeight" name="bodyWeight" type="number" step="0.1" inputmode="decimal" placeholder="kg" />
+                  </div>
+                  <div class="form-field">
+                    <label for="measurementWaist">Cintura</label>
+                    <input id="measurementWaist" name="waist" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                  </div>
+                  <div class="form-field">
+                    <label for="measurementFat">Grasa corporal</label>
+                    <input id="measurementFat" name="bodyFat" type="number" step="0.1" inputmode="decimal" placeholder="%" />
+                  </div>
+                  <div class="form-field">
+                    <label for="measurementSleep">Sueño</label>
+                    <input id="measurementSleep" name="sleepHours" type="number" step="0.5" inputmode="decimal" placeholder="horas" />
+                  </div>
+                </div>
+                <details class="details-panel">
+                  <summary>Medidas avanzadas</summary>
+                  <div class="details-body form-grid">
+                    <div class="mini-grid">
+                      <div class="form-field">
+                        <label for="measurementChest">Pecho</label>
+                        <input id="measurementChest" name="chest" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                      </div>
+                      <div class="form-field">
+                        <label for="measurementArm">Brazo</label>
+                        <input id="measurementArm" name="arm" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                      </div>
+                      <div class="form-field">
+                        <label for="measurementThigh">Pierna</label>
+                        <input id="measurementThigh" name="thigh" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                      </div>
+                      <div class="form-field">
+                        <label for="measurementHips">Cadera</label>
+                        <input id="measurementHips" name="hips" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                      </div>
+                      <div class="form-field">
+                        <label for="measurementNeck">Cuello</label>
+                        <input id="measurementNeck" name="neck" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                      </div>
+                    </div>
+                  </div>
+                </details>
+                <div class="form-field">
+                  <label for="measurementNotes">Notas</label>
+                  <textarea id="measurementNotes" name="notes" placeholder="Recuperación, estrés, digestión, etc."></textarea>
+                </div>
+                <div class="session-actions-row">
+                  <button type="submit">Guardar medición</button>
+                  <button type="button" id="cancelMeasurementEditBtn" class="ghost" hidden>Cancelar edición</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Historial corporal</h2>
+                  <p>Ahora cada medición muestra deltas frente a la anterior.</p>
+                </div>
+              </div>
+              <div id="measurementList" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="analytics" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Evolución</span></div>
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Lectura global</h2>
+                  <p>Frecuencia, volumen y señales rápidas para decidir mejor.</p>
+                </div>
+              </div>
+              <div id="analyticsHighlights" class="list compact"></div>
+            </article>
+
+            <article class="card">
+              <div class="card-head card-head-stack-mobile">
+                <div>
+                  <h2>e1RM del lift clave</h2>
+                  <p>Evolución real del ejercicio que quieras seguir.</p>
+                </div>
+                <div>
+                  <label class="sr-only" for="analyticsLiftSelect">Elegir lift</label>
+                  <select id="analyticsLiftSelect"></select>
+                </div>
+              </div>
+              <div id="analyticsLiftChart" class="chart"></div>
+            </article>
+          </div>
+
+          <div class="panel-grid three">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Frecuencia semanal</h2>
+                </div>
+              </div>
+              <div id="analyticsFrequencyChart" class="chart"></div>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Volumen semanal</h2>
+                </div>
+              </div>
+              <div id="analyticsVolumeChart" class="chart"></div>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Comparación mensual</h2>
+                </div>
+              </div>
+              <div id="analyticsMonthlyChart" class="chart"></div>
+            </article>
+          </div>
+
+          <div class="panel-grid three">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Ejercicios estancados</h2>
+                  <p>Los que más piden revisión.</p>
+                </div>
+              </div>
+              <div id="analyticsStalls" class="list compact"></div>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Grupos musculares</h2>
+                  <p>Distribución del trabajo en 30 días.</p>
+                </div>
+              </div>
+              <div id="analyticsMuscles" class="chart"></div>
+            </article>
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Adherencia</h2>
+                  <p>Qué hábitos vas cumpliendo y cuáles no.</p>
+                </div>
+              </div>
+              <div id="analyticsHabits" class="list compact"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="goals" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Objetivos</span></div>
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Objetivos</h2>
+                  <p>Resultados + hábitos. Más lectura de ritmo, menos simple lista de metas.</p>
+                </div>
+              </div>
+              <form id="goalForm" class="form-grid">
+                <div class="form-field">
+                  <label for="goalAthleteName">Nombre dentro de la app</label>
+                  <input id="goalAthleteName" name="athleteName" placeholder="Tu nombre" />
+                </div>
+                <div class="mini-grid two-columns">
+                  <div class="form-field">
+                    <label for="goalDate">Fecha objetivo</label>
+                    <input id="goalDate" name="goalDate" type="date" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalWeight">Objetivo de peso</label>
+                    <input id="goalWeight" name="bodyWeight" type="number" step="0.1" inputmode="decimal" placeholder="kg" />
+                  </div>
+                </div>
+                <div class="mini-grid">
+                  <div class="form-field">
+                    <label for="goalWaist">Objetivo de cintura</label>
+                    <input id="goalWaist" name="waist" type="number" step="0.1" inputmode="decimal" placeholder="cm" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalFat">Objetivo de grasa</label>
+                    <input id="goalFat" name="bodyFat" type="number" step="0.1" inputmode="decimal" placeholder="%" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalBench">PR press banca</label>
+                    <input id="goalBench" name="bench" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalSquat">PR sentadilla</label>
+                    <input id="goalSquat" name="squat" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
+                  </div>
+                  <div class="form-field">
+                    <label for="goalDeadlift">PR peso muerto</label>
+                    <input id="goalDeadlift" name="deadlift" type="number" step="0.5" inputmode="decimal" placeholder="kg" />
+                  </div>
+                </div>
+                <div class="form-field">
+                  <label for="goalFocus">Meta principal del bloque</label>
+                  <textarea id="goalFocus" name="focusGoal" placeholder="Qué quieres conseguir en este bloque"></textarea>
+                </div>
+                <details class="details-panel">
+                  <summary>Objetivos de hábito</summary>
+                  <div class="details-body form-grid">
+                    <div class="mini-grid two-columns">
+                      <div class="form-field">
+                        <label for="goalWorkoutsPerWeek">Entrenar por semana</label>
+                        <input id="goalWorkoutsPerWeek" name="workoutsPerWeek" type="number" min="1" step="1" inputmode="numeric" placeholder="4" />
+                      </div>
+                      <div class="form-field">
+                        <label for="goalSleepHours">Dormir cada noche</label>
+                        <input id="goalSleepHours" name="sleepHours" type="number" min="1" step="0.5" inputmode="decimal" placeholder="7.5 h" />
+                      </div>
+                      <div class="form-field">
+                        <label for="goalMeasureEveryDays">Medirte cada X días</label>
+                        <input id="goalMeasureEveryDays" name="measureEveryDays" type="number" min="1" step="1" inputmode="numeric" placeholder="14" />
+                      </div>
+                      <div class="form-field">
+                        <label for="goalMinimumStreakDays">Continuidad mínima</label>
+                        <input id="goalMinimumStreakDays" name="minimumStreakDays" type="number" min="1" step="1" inputmode="numeric" placeholder="3" />
+                      </div>
+                    </div>
+                  </div>
+                </details>
+                <button type="submit">Guardar objetivos</button>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Estado frente a objetivos</h2>
+                  <p>Con narrativa principal, progreso y lectura de ritmo.</p>
+                </div>
+              </div>
+              <div id="goalSummary" class="list"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Ajustes</span></div>
+          <div class="panel-grid two">
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Ajustes de uso diario</h2>
+                  <p>Lo que toca con más frecuencia mientras entrenas.</p>
+                </div>
+              </div>
+              <form id="preferencesForm" class="form-grid">
+                <div class="mini-grid two-columns">
+                  <div class="form-field">
+                    <label for="prefRest">Descanso por defecto</label>
+                    <input id="prefRest" name="defaultRestSeconds" type="number" min="15" step="15" inputmode="numeric" placeholder="segundos" />
+                  </div>
+                  <div class="form-field">
+                    <label for="prefIncrement">Incremento recomendado</label>
+                    <input id="prefIncrement" name="suggestionIncrement" type="number" min="0.5" step="0.5" inputmode="decimal" placeholder="kg" />
+                  </div>
+                </div>
+                <p class="helper-line settings-inline-note">La app trabaja en sistema métrico para mantener todas las pantallas y cálculos coherentes.</p>
+                <label class="switch-row">
+                  <input name="autoStartRest" type="checkbox" />
+                  <span>Iniciar automáticamente el descanso al guardar una serie</span>
+                </label>
+                <label class="switch-row">
+                  <input name="enableVibration" type="checkbox" />
+                  <span>Vibración al terminar el descanso</span>
+                </label>
+                <label class="switch-row">
+                  <input name="collapseManualLog" type="checkbox" />
+                  <span>Dejar plegado el registro manual por defecto</span>
+                </label>
+                <details class="details-panel">
+                  <summary>Ajustes avanzados</summary>
+                  <div class="details-body form-grid">
+                    <label class="switch-row">
+                      <input name="keepScreenAwake" type="checkbox" />
+                      <span>Intentar mantener la pantalla encendida durante la sesión</span>
+                    </label>
+                    <label class="switch-row">
+                      <input name="showWarmupsInLogs" type="checkbox" />
+                      <span>Mostrar series de calentamiento en el histórico</span>
+                    </label>
+                  </div>
+                </details>
+                <button type="submit">Guardar preferencias</button>
+              </form>
+            </article>
+
+            <article class="card">
+              <div class="card-head">
+                <div>
+                  <h2>Sistema, copias y PWA</h2>
+                  <p>Todo lo global vive ya aquí: exportar, importar, resetear y estado técnico.</p>
+                </div>
+              </div>
+              <div class="settings-actions-block">
+                <p class="helper-line">Tus datos se guardan localmente en este dispositivo (IndexedDB con respaldo local). Exporta copias periódicas para máxima tranquilidad.</p>
+                <div class="actions-row settings-actions-row">
+                  <button id="installBtn" class="ghost" hidden type="button">Instalar app</button>
+                  <button id="iosInstallBtn" class="ghost" hidden type="button">Cómo instalar en iPhone</button>
+                  <button id="loadDemoBtn" class="ghost" type="button">Cargar demo</button>
+                </div>
+                <div class="actions-row settings-actions-row">
+                  <button id="exportBtn" class="ghost" type="button">Exportar JSON</button>
+                  <button id="exportCsvBtn" class="ghost" type="button">Exportar CSV</button>
+                  <label class="ghost file-label">
+                    <span>Importar JSON</span>
+                    <input id="importInput" type="file" accept="application/json" hidden />
+                  </label>
+                </div>
+                <div class="danger-zone">
+                  <p class="helper-line">Peligro: borra todo el historial, rutinas, objetivos y sesión activa.</p>
+                  <button id="resetBtn" class="danger" type="button">Resetear todos los datos</button>
+                </div>
+              </div>
+              <div id="pwaStatusBox" class="list"></div>
+            </article>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="iosInstallDialog" aria-labelledby="iosInstallTitle">
+      <div class="dialog-card">
+        <h2 id="iosInstallTitle">Instalar en iPhone</h2>
+        <p>Abre la app en Safari, toca Compartir y después selecciona <strong>Añadir a pantalla de inicio</strong>.</p>
+        <button id="closeIosDialogBtn">Entendido</button>
+      </div>
+    </dialog>
+
+    <dialog id="groupEditorDialog" aria-labelledby="groupEditorTitle">
+      <form method="dialog" class="dialog-card dialog-card--wide" id="groupEditorForm">
+        <div class="dialog-head">
+          <h2 id="groupEditorTitle">Corregir histórico</h2>
+          <button type="button" class="ghost small" id="closeGroupEditorBtn">Cerrar</button>
+        </div>
+        <div id="groupEditorContent"></div>
+        <div class="actions-row dialog-actions">
+          <button type="submit">Guardar cambios</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog id="sessionSetEditorDialog" class="dialog-shell" aria-labelledby="sessionSetEditorTitle">
+      <form id="sessionSetEditorForm" class="form-grid">
+        <h3 id="sessionSetEditorTitle">Editar serie</h3>
+        <input type="hidden" name="entryId" />
+        <div class="mini-grid">
+          <div class="form-field">
+            <label for="sessionEditorWeight">Peso</label>
+            <input id="sessionEditorWeight" name="weight" type="number" min="0" step="0.5" required />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorReps">Reps</label>
+            <input id="sessionEditorReps" name="reps" type="number" min="1" step="1" required />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorRpe">RPE</label>
+            <input id="sessionEditorRpe" name="rpe" type="number" min="1" max="10" step="0.5" />
+          </div>
+          <div class="form-field">
+            <label for="sessionEditorRest">Descanso</label>
+            <input id="sessionEditorRest" name="rest" type="number" min="0" step="15" />
+          </div>
+        </div>
+        <label class="switch-row compact-switch">
+          <input type="checkbox" name="isWarmup" id="sessionEditorWarmup" />
+          <span>Marcar como warm-up</span>
+        </label>
+        <div class="session-actions-row">
+          <button type="submit">Guardar cambios</button>
+          <button type="button" id="cancelSessionSetEditorBtn" class="ghost">Cancelar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <template id="exerciseRowTemplate">
+      <div class="exercise-row">
+        <div class="exercise-row-grid">
+          <div class="form-field form-field--tiny">
+            <label class="sr-only">Bloque</label>
+            <input data-field="block" placeholder="A1" />
+          </div>
+          <div class="form-field form-field--wide">
+            <label class="sr-only">Ejercicio</label>
+            <input data-field="name" placeholder="Ejercicio" list="exerciseSuggestions" />
+          </div>
+          <div class="form-field form-field--tiny">
+            <label class="sr-only">Series</label>
+            <input data-field="sets" type="number" step="1" min="1" inputmode="numeric" placeholder="Series" />
+          </div>
+          <div class="form-field form-field--tiny">
+            <label class="sr-only">Repeticiones</label>
+            <input data-field="reps" placeholder="Reps" />
+          </div>
+          <div class="form-field form-field--tiny">
+            <label class="sr-only">Descanso</label>
+            <input data-field="rest" type="number" step="15" min="0" inputmode="numeric" placeholder="Descanso" />
+          </div>
+          <div class="form-field form-field--wide">
+            <label class="sr-only">Notas del ejercicio</label>
+            <input data-field="notes" placeholder="Notas opcionales" />
+          </div>
+        </div>
+        <div class="exercise-row-actions">
+          <button type="button" class="ghost small" data-action="move-routine-row-up">↑</button>
+          <button type="button" class="ghost small" data-action="move-routine-row-down">↓</button>
+          <button type="button" class="ghost small" data-action="duplicate-routine-row">Duplicar</button>
+          <button type="button" class="ghost small" data-action="add-below-routine-row">Añadir debajo</button>
+          <button type="button" class="ghost small" data-action="remove-routine-row">Quitar</button>
+        </div>
+      </div>
+    </template>
+
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

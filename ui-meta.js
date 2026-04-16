@@ -12,7 +12,7 @@ import {
   computeFirstLiftMap,
   computeGoalProgress,
   detectPotentialStall
-} from "./analytics.js";
+} from "./analytics-core.js";
 import { buildBarChart, buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
 import { formatDate, formatNumber, percentage, daysBetween, todayLocal } from "./utils.js";
 
@@ -336,25 +336,23 @@ export function renderPwaStatus(els, pwaStatus, storageStatus) {
       chips: [{ label: pwaStatus.standalone ? "Instalada" : pwaStatus.installAvailable ? "Lista" : "Pendiente", type: pwaStatus.standalone ? "success" : pwaStatus.installAvailable ? "warning" : "ghost" }]
     },
     {
-      title: "Actualizaciones",
-      subtitle: pwaStatus.updateReady
-        ? "Hay una nueva versión descargada y lista para aplicar con seguridad desde el botón superior."
-        : "No hay una actualización pendiente ahora mismo. Cuando exista, se mostrará un aviso claro.",
-      chips: [{ label: pwaStatus.updateReady ? "Lista para aplicar" : "Al día", type: pwaStatus.updateReady ? "warning" : "success" }]
+      title: "Manifest e iconos",
+      subtitle: pwaStatus.manifestPresent
+        ? "Manifest enlazado y assets principales detectados."
+        : "Falta manifest o iconos; revisa para asegurar instalabilidad.",
+      chips: [{ label: pwaStatus.manifestPresent ? "OK" : "Revisar", type: pwaStatus.manifestPresent ? "success" : "danger" }]
     },
     {
-      title: "Manifest, iconos y service worker",
-      subtitle: !pwaStatus.manifestPresent
-        ? "Falta manifest o iconos; revisa para asegurar instalabilidad."
-        : !pwaStatus.swSupported
-          ? "Este navegador no soporta service worker."
-          : pwaStatus.registration
-            ? (pwaStatus.controlled ? "Manifest correcto y service worker controlando esta pestaña para uso offline." : "Manifest correcto. El service worker ya se registró, pero esta pestaña aún no está bajo control.")
-            : "Manifest correcto, pero aún no se detecta un service worker activo.",
-      chips: [{ label: !pwaStatus.manifestPresent ? "Revisar" : pwaStatus.controlled ? "Offline listo" : pwaStatus.registration ? "Casi listo" : "Pendiente", type: !pwaStatus.manifestPresent ? "danger" : pwaStatus.controlled ? "success" : "warning" }]
+      title: "Service worker",
+      subtitle: !pwaStatus.swSupported
+        ? "Este navegador no soporta service worker."
+        : pwaStatus.registration
+          ? (pwaStatus.controlled ? "Registrado y controlando esta pestaña. Habrá caché offline según versiones ya visitadas." : "Registrado, pero esta pestaña aún no está bajo control. Recarga para finalizar.")
+          : "No se detecta registro activo todavía; sin caché offline confiable.",
+      chips: [{ label: !pwaStatus.swSupported ? "No soportado" : pwaStatus.controlled ? "Activo" : pwaStatus.registration ? "Parcial" : "Pendiente", type: !pwaStatus.swSupported ? "warning" : pwaStatus.controlled ? "success" : "warning" }]
     },
     {
-      title: "Guardado local y backup",
+      title: "Guardado local y offline",
       subtitle: storageStatus.mode === "indexeddb"
         ? "Guardado principal en IndexedDB con respaldo local automático."
         : "Se usa respaldo local porque IndexedDB no está disponible en este entorno.",

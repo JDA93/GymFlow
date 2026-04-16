@@ -1,386 +1,433 @@
-import { getExerciseMeta, normalizeWorkoutRecord } from "./catalog.js";
-import { calcVolumeFromEntries, datePartFromIso, FALLBACK_REST_SECONDS, normalizeNameForMatch, optionalNumber, safeNumber, todayLocal, uid } from "./utils.js";
-import { getActiveRoutine, syncSessionHistoryEntry } from "./analytics.js";
+import { mergeDeep, numOrBlank, optionalNumber, safeClone, safeNumber, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
+import { normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
 
-export function createBlankSession() {
+const DB_NAME = "gymflow-pro-db";
+const DB_VERSION = 1;
+const DB_STORE = "app_state";
+const DB_KEY = "state";
+const FALLBACK_STORAGE_KEY = "gymflow-pro-fallback";
+const LEGACY_STORAGE_KEYS = [
+  FALLBACK_STORAGE_KEY,
+  "gymflow-pro-v6-fallback",
+  "gymflow-pro-v5-fallback",
+  "gymflow-pro-v4-data",
+  "gymflow-pro-v3-data"
+];
+
+export function defaultState() {
   return {
-    active: false,
-    sessionId: "",
-    routineId: "",
-    startedAt: "",
-    endedAt: "",
-    completedExerciseIds: [],
-    skippedExerciseIds: [],
-    currentExerciseId: "",
-    notes: "",
-    setEntries: [],
-    lastDeletedSet: null,
-    restTimerEndsAt: ""
+    version: 7,
+    workouts: [],
+    measurements: [],
+    routines: [],
+    sessionHistory: [],
+    goals: {
+      athleteName: "",
+      focusGoal: "",
+      goalDate: "",
+      resultGoals: {
+        bodyWeight: "",
+        waist: "",
+        bodyFat: "",
+        bench: "",
+        squat: "",
+        deadlift: ""
+      },
+      habits: {
+        workoutsPerWeek: "",
+        sleepHours: "",
+        measureEveryDays: "",
+        minimumStreakDays: ""
+      }
+    },
+    preferences: {
+      units: "metric",
+      defaultRestSeconds: FALLBACK_REST_SECONDS,
+      suggestionIncrement: 2.5,
+      autoStartRest: true,
+      keepScreenAwake: false,
+      showWarmupsInLogs: true,
+      enableVibration: true,
+      collapseManualLog: true
+    },
+    session: {
+      active: false,
+      sessionId: "",
+      routineId: "",
+      startedAt: "",
+      endedAt: "",
+      completedExerciseIds: [],
+      skippedExerciseIds: [],
+      currentExerciseId: "",
+      notes: "",
+      setEntries: [],
+      lastDeletedSet: null,
+      restTimerEndsAt: ""
+    },
+    ui: {
+      activeTab: "dashboard",
+      editingWorkoutId: "",
+      editingRoutineId: "",
+      editingMeasurementId: "",
+      editingGroupId: "",
+      routineSearch: "",
+      routineDayFilter: "all",
+      dashboardExerciseId: "",
+      dashboardExerciseMetric: "e1rm",
+      dashboardMetric: "bodyWeight",
+      chartAggregation: "day",
+      analyticsLiftId: "",
+      logSearch: "",
+      logRoutine: "all",
+      logSort: "date_desc",
+      logSource: "all",
+      logMuscle: "all",
+      logDatePreset: "all",
+      sessionManualOpen: false,
+      settingsAdvancedOpen: false,
+      logFiltersOpen: false,
+      moreSection: "routines"
+    },
+    meta: {
+      saveStatus: "saved",
+      lastSavedAt: "",
+      storageMode: "indexeddb"
+    }
   };
 }
 
-export function hasActiveSessionRisk(state) {
-  return Boolean(state.session.active && (state.session.setEntries.length || state.session.notes.trim()));
-}
+export async function createStore(saveStatusEl) {
+  let db = null;
+  let state = defaultState();
+  let saveTimeout = null;
+  let saveInFlight = Promise.resolve();
 
-export function describeActiveSessionRisk(state) {
-  const entries = state.session.setEntries || [];
-  const working = entries.filter((item) => !item.isWarmup).length;
-  const warmups = entries.filter((item) => item.isWarmup).length;
-  const notes = state.session.notes?.trim() ? 1 : 0;
-  if (!working && !warmups && !notes) return "";
-  const parts = [];
-  if (working) parts.push(`${working} series efectivas`);
-  if (warmups) parts.push(`${warmups} warm-up`);
-  if (notes) parts.push("notas");
-  return parts.join(", ");
-}
-
-export function beginSessionFromRoutine(state, routineId, confirmReplace = window.confirm) {
-  if (!routineId) return { status: "error", message: "Selecciona una rutina." };
-
-  const routine = state.routines.find((item) => item.id === routineId);
-  if (!routine) {
-    return { status: "error", message: "La rutina seleccionada ya no existe. Abre Rutinas y elige una válida." };
-  }
-  if (!Array.isArray(routine.exercises) || !routine.exercises.length) {
-    return { status: "error", message: "La rutina seleccionada no tiene ejercicios. Añade al menos uno antes de iniciar." };
+  try {
+    db = await openDb();
+    const stored = await idbGet(db, DB_KEY);
+    if (stored) state = migrateState(stored);
+  } catch (error) {
+    console.warn("IndexedDB no disponible, se intentará usar almacenamiento de respaldo.", error);
   }
 
-  if (state.session.active) {
-    if (state.session.routineId === routineId) {
-      return { status: "existing", message: "Ya tienes esta sesión activa. Continúa donde la dejaste." };
+  if (!state.workouts.length && !state.measurements.length && !state.routines.length) {
+    for (const key of LEGACY_STORAGE_KEYS) {
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        state = migrateState(JSON.parse(raw));
+        break;
+      } catch (error) {
+        console.warn("No se pudo leer almacenamiento legado", key, error);
+      }
+    }
+  }
+
+  const store = {
+    get state() {
+      return state;
+    },
+    set state(nextState) {
+      state = migrateState(nextState);
+    },
+    queueSave,
+    flushSave,
+    markSaved,
+    updateSaveIndicator,
+    isUsingFallback() {
+      return state.meta.storageMode !== "indexeddb";
+    }
+  };
+
+  updateSaveIndicator("saved");
+  return store;
+
+  function updateSaveIndicator(status) {
+    state.meta.saveStatus = status;
+    if (!saveStatusEl) return;
+    saveStatusEl.dataset.state = status;
+    const labels = {
+      dirty: "Pendiente",
+      saving: "Guardando…",
+      saved: state.meta.lastSavedAt ? `Guardado ${new Date(state.meta.lastSavedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}` : "Guardado",
+      degraded: "Guardado local",
+      error: "Error al guardar"
+    };
+    saveStatusEl.textContent = labels[status] || "Guardado";
+  }
+
+  function markSaved(mode = db ? "indexeddb" : "localStorage") {
+    state.meta.lastSavedAt = new Date().toISOString();
+    state.meta.storageMode = mode;
+    updateSaveIndicator(mode === "indexeddb" ? "saved" : "degraded");
+  }
+
+  function queueSave() {
+    updateSaveIndicator("dirty");
+    clearTimeout(saveTimeout);
+    saveTimeout = setTimeout(() => {
+      saveInFlight = saveInFlight.then(() => persist());
+    }, 160);
+  }
+
+  async function flushSave() {
+    clearTimeout(saveTimeout);
+    await saveInFlight;
+    await persist();
+  }
+
+  async function persist() {
+    updateSaveIndicator("saving");
+    const snapshot = safeClone(state);
+    try {
+      localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(snapshot));
+    } catch (error) {
+      console.warn("No se pudo actualizar el respaldo en localStorage", error);
     }
 
-    const hasData = state.session.setEntries.length > 0 || state.session.notes.trim();
-    const accepted = confirmReplace(hasData
-      ? "Ya hay una sesión activa con series guardadas. Si cambias de rutina, perderás esa sesión activa. ¿Quieres reemplazarla?"
-      : "Ya hay una sesión activa. ¿Quieres reemplazarla?");
-
-    if (!accepted) return { status: "cancelled", message: "Se mantiene la sesión actual." };
-  }
-
-  state.session = {
-    ...createBlankSession(),
-    active: true,
-    sessionId: uid(),
-    routineId,
-    startedAt: new Date().toISOString(),
-    currentExerciseId: ""
-  };
-
-  return { status: "started", message: "Sesión iniciada." };
-}
-
-export function discardActiveSession(state) {
-  state.session = createBlankSession();
-}
-
-export function setSessionNotes(state, notes) {
-  state.session.notes = String(notes || "");
-}
-
-export function getSessionDurationSeconds(state) {
-  if (!state.session.active || !state.session.startedAt) return 0;
-  return Math.max(0, Math.floor((Date.now() - new Date(state.session.startedAt).getTime()) / 1000));
-}
-
-export function getSessionEntriesByExercise(state, exerciseId) {
-  return state.session.setEntries
-    .filter((item) => item.exerciseId === exerciseId)
-    .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-}
-
-export function getWorkingEntriesByExercise(state, exerciseId) {
-  return getSessionEntriesByExercise(state, exerciseId).filter((item) => !item.isWarmup);
-}
-
-export function recomputeCompletedExercises(state) {
-  const routine = getActiveRoutine(state);
-  if (!routine) {
-    state.session.completedExerciseIds = [];
-    return [];
-  }
-
-  const completed = routine.exercises
-    .filter((exercise) => getWorkingEntriesByExercise(state, exercise.id).length >= Number(exercise.sets || 0) && Number(exercise.sets || 0) > 0)
-    .map((exercise) => exercise.id);
-
-  state.session.completedExerciseIds = completed;
-  state.session.skippedExerciseIds = (state.session.skippedExerciseIds || []).filter((id) => routine.exercises.some((exercise) => exercise.id === id));
-  return completed;
-}
-
-export function isExerciseSkipped(state, exerciseId) {
-  return (state.session.skippedExerciseIds || []).includes(exerciseId);
-}
-
-export function getExerciseCompletionStatus(state, exercise) {
-  const workingEntries = getWorkingEntriesByExercise(state, exercise.id);
-  const targetSets = Number(exercise.sets || 0);
-  const skipped = isExerciseSkipped(state, exercise.id);
-  const completed = !skipped && targetSets > 0 && workingEntries.length >= targetSets;
-  const inProgress = !skipped && workingEntries.length > 0 && !completed;
-  return { skipped, completed, inProgress, workingEntries, targetSets };
-}
-
-export function toggleSkipExercise(state, exerciseId) {
-  const set = new Set(state.session.skippedExerciseIds || []);
-  const wasSkipped = set.has(exerciseId);
-  if (wasSkipped) set.delete(exerciseId);
-  else set.add(exerciseId);
-  state.session.skippedExerciseIds = [...set];
-  recomputeCompletedExercises(state);
-  return !wasSkipped
-    ? { ok: true, message: "Ejercicio omitido por ahora." }
-    : { ok: true, message: "Ejercicio reactivado." };
-}
-
-export function addSessionSet(state, exerciseId, payload) {
-  const routine = getActiveRoutine(state);
-  const exercise = routine?.exercises.find((item) => item.id === exerciseId);
-  if (!exercise) return { ok: false, message: "No se ha encontrado el ejercicio." };
-
-  const weight = Number(payload.weight);
-  const reps = Number(payload.reps);
-  const rest = safeNumber(payload.rest || exercise.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS);
-  const isWarmup = Boolean(payload.isWarmup);
-
-  if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
-    return { ok: false, message: "Introduce un peso válido (puede ser 0) y repeticiones mayores que 0." };
-  }
-
-  const meta = getExerciseMeta(exercise.name);
-  state.session.setEntries.push({
-    id: uid(),
-    exerciseId,
-    exerciseName: meta.name,
-    exerciseKey: meta.key,
-    muscleGroup: meta.muscleGroup,
-    movementPattern: meta.pattern,
-    weight,
-    reps,
-    rpe: optionalNumber(payload.rpe, { min: 1, max: 10 }),
-    rest,
-    isWarmup,
-    createdAt: new Date().toISOString(),
-    notes: String(payload.notes || "")
-  });
-
-  state.session.currentExerciseId = exerciseId;
-  state.session.lastDeletedSet = null;
-  recomputeCompletedExercises(state);
-  const nextExerciseId = getNextSuggestedExerciseId(state, exerciseId);
-  return {
-    ok: true,
-    message: `${exercise.name}: serie guardada.`,
-    rest,
-    exerciseName: exercise.name,
-    currentExerciseCompleted: getWorkingEntriesByExercise(state, exerciseId).length >= Number(exercise.sets || 0),
-    nextExerciseId
-  };
-}
-
-export function deleteSessionSet(state, entryId) {
-  const index = state.session.setEntries.findIndex((item) => item.id === entryId);
-  if (index < 0) return { ok: false, message: "No se ha encontrado la serie." };
-  const [removed] = state.session.setEntries.splice(index, 1);
-  state.session.lastDeletedSet = removed;
-  recomputeCompletedExercises(state);
-  return { ok: true, message: "Serie eliminada.", removed };
-}
-
-export function updateSessionSet(state, entryId, payload) {
-  const index = state.session.setEntries.findIndex((item) => item.id === entryId);
-  if (index < 0) return { ok: false, message: "No se ha encontrado la serie para editar." };
-  const current = state.session.setEntries[index];
-  const weight = Number(payload.weight);
-  const reps = Number(payload.reps);
-  const rpe = payload.rpe === "" || payload.rpe == null ? "" : optionalNumber(payload.rpe, { min: 1, max: 10 });
-  if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
-    return { ok: false, message: "La edición requiere peso válido y reps mayores a 0." };
-  }
-  state.session.setEntries[index] = {
-    ...current,
-    weight,
-    reps,
-    rpe,
-    isWarmup: Boolean(payload.isWarmup),
-    rest: safeNumber(payload.rest || current.rest || state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS),
-    updatedAt: new Date().toISOString()
-  };
-  recomputeCompletedExercises(state);
-  return { ok: true, message: "Serie actualizada." };
-}
-
-export function restoreLastDeletedSessionSet(state) {
-  if (!state.session.lastDeletedSet) return { ok: false, message: "No hay una serie reciente para recuperar." };
-  state.session.setEntries.push({ ...state.session.lastDeletedSet, id: uid(), createdAt: new Date().toISOString() });
-  state.session.lastDeletedSet = null;
-  recomputeCompletedExercises(state);
-  return { ok: true, message: "Serie recuperada." };
-}
-
-export function copyLastSessionIntoActive(state, confirmReplace = window.confirm) {
-  const routine = getActiveRoutine(state);
-  if (!routine) return { ok: false, message: "Inicia primero una rutina." };
-
-  const sourceSession = [...state.sessionHistory]
-    .filter((item) => item.routineId === routine.id && item.sessionId !== state.session.sessionId)
-    .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")) || String(b.endedAt || "").localeCompare(String(a.endedAt || "")))[0];
-
-  if (!sourceSession?.sessionId) {
-    return { ok: false, message: "No hay una sesión anterior de esta rutina para copiar." };
-  }
-
-  const sourceEntries = state.workouts
-    .filter((item) => item.sessionId === sourceSession.sessionId)
-    .sort((a, b) => String(a.createdAt || "").localeCompare(String(b.createdAt || "")));
-
-  if (!sourceEntries.length) {
-    return { ok: false, message: "La sesión anterior no tiene series guardadas." };
-  }
-
-  const activeRisk = describeActiveSessionRisk(state);
-  if (activeRisk) {
-    const accepted = confirmReplace(`Ya tienes datos en la sesión activa (${activeRisk}). Copiar la última sesión reemplazará esas series. ¿Quieres continuar?`);
-    if (!accepted) return { ok: false, code: "cancelled", message: "Se mantiene la sesión activa actual." };
-  }
-
-  const now = Date.now();
-  const copied = [];
-  const omitted = [];
-  sourceEntries.forEach((item) => {
-    const matchedExercise = matchRoutineExercise(routine, item);
-    if (!matchedExercise) {
-      omitted.push(item.id);
+    if (!db) {
+      markSaved("localStorage");
       return;
     }
-    copied.push({
-      id: uid(),
-      exerciseId: matchedExercise.id,
-      exerciseName: matchedExercise.name,
-      exerciseKey: matchedExercise.exerciseKey || matchedExercise.catalogId || item.exerciseKey || item.exerciseId || "",
-      muscleGroup: matchedExercise.muscleGroup || item.muscleGroup || "",
-      movementPattern: matchedExercise.movementPattern || item.movementPattern || "",
-      weight: safeNumber(item.weight, 0),
-      reps: Math.max(1, safeNumber(item.reps, 1)),
-      rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
-      rest: optionalNumber(item.rest, { min: 0 }),
-      isWarmup: Boolean(item.isWarmup),
-      createdAt: new Date(now + copied.length * 1000).toISOString(),
-      notes: String(item.notes || "")
-    });
-  });
 
-  state.session.setEntries = copied;
-  state.session.skippedExerciseIds = [];
-  state.session.lastDeletedSet = null;
-  recomputeCompletedExercises(state);
-  if (!copied.length) {
-    return { ok: false, message: "La sesión anterior no tiene series compatibles con la rutina activa." };
+    try {
+      await idbSet(db, DB_KEY, snapshot);
+      markSaved("indexeddb");
+    } catch (error) {
+      console.error("No se pudo guardar en IndexedDB", error);
+      try {
+        localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(snapshot));
+        markSaved("localStorage");
+      } catch (fallbackError) {
+        console.error("No se pudo guardar ni siquiera el respaldo local", fallbackError);
+        updateSaveIndicator("error");
+      }
+    }
   }
-  return {
-    ok: true,
-    message: omitted.length
-      ? `Se copiaron ${copied.length} series válidas. ${omitted.length} se omitieron por no tener match seguro.`
-      : `Se han copiado ${copied.length} series de la última sesión.`
-  };
 }
 
-function matchRoutineExercise(routine, entry) {
-  if (!routine?.exercises?.length) return null;
-  const byRoutineInternalId = routine.exercises.find((exercise) => exercise.id && exercise.id === entry.exerciseId);
-  if (byRoutineInternalId) return byRoutineInternalId;
-  const byCatalogId = routine.exercises.find((exercise) => exercise.catalogId && exercise.catalogId === entry.exerciseId);
-  if (byCatalogId) return byCatalogId;
-  const byExerciseKey = routine.exercises.find((exercise) => exercise.exerciseKey && exercise.exerciseKey === (entry.exerciseKey || entry.exerciseId));
-  if (byExerciseKey) return byExerciseKey;
-  const normalizedEntryName = normalizeNameForMatch(entry.exercise || entry.exerciseName);
-  if (!normalizedEntryName) return null;
-  return routine.exercises.find((exercise) => normalizeNameForMatch(exercise.name) === normalizedEntryName) || null;
-}
+export function migrateState(rawState) {
+  const raw = rawState || {};
+  const base = mergeDeep(defaultState(), raw);
+  base.version = 7;
 
-export function getNextSuggestedExerciseId(state, currentExerciseId = "") {
-  const routine = getActiveRoutine(state);
-  if (!routine) return "";
-  const currentIndex = routine.exercises.findIndex((exercise) => exercise.id === currentExerciseId);
-  const candidates = currentIndex >= 0
-    ? [...routine.exercises.slice(currentIndex), ...routine.exercises.slice(0, currentIndex)]
-    : [...routine.exercises];
-  const next = candidates.find((exercise) => {
-    const status = getExerciseCompletionStatus(state, exercise);
-    return !status.completed && !status.skipped;
-  });
-  return next?.id || currentExerciseId || routine.exercises[0]?.id || "";
-}
-
-export function endSession(state) {
-  if (!state.session.active) {
-    return { ok: false, code: "no-session", message: "No hay sesión activa." };
-  }
-
-  if (!state.session.setEntries.length) {
-    return { ok: false, code: "empty-session", message: "La sesión está vacía." };
-  }
-
-  const routine = getActiveRoutine(state);
-  const endedAt = new Date().toISOString();
-  const entries = [...state.session.setEntries];
-
-  const workoutRecords = entries.map((entry) => normalizeWorkoutRecord({
-    id: uid(),
-    date: datePartFromIso(entry.createdAt) || todayLocal(),
-    routineId: state.session.routineId,
-    sessionId: state.session.sessionId,
-    exercise: entry.exerciseName || routine?.exercises.find((item) => item.id === entry.exerciseId)?.name || "Ejercicio",
-    exerciseId: routine?.exercises.find((item) => item.id === entry.exerciseId)?.catalogId || entry.exerciseId,
-    exerciseKey: entry.exerciseKey || entry.exerciseId,
-    muscleGroup: entry.muscleGroup || "",
-    movementPattern: entry.movementPattern || "",
-    weight: Number(entry.weight || 0),
-    sets: 1,
-    reps: Number(entry.reps || 0),
-    rpe: entry.rpe === "" ? "" : Number(entry.rpe),
-    rest: entry.rest === "" ? "" : Number(entry.rest),
-    tempo: "",
-    notes: entry.notes || (entry.isWarmup ? "Serie de calentamiento" : "Serie guardada desde sesión"),
-    isWarmup: Boolean(entry.isWarmup),
-    source: "session",
-    createdAt: entry.createdAt,
-    updatedAt: endedAt
-  }));
-
-  state.workouts.push(...workoutRecords);
-
-  const effectiveCompleted = (routine?.exercises || []).filter((exercise) => {
-    const status = getExerciseCompletionStatus(state, exercise);
-    return status.completed;
-  }).length;
-
-  const existingIndex = state.sessionHistory.findIndex((item) => item.sessionId === state.session.sessionId);
-  const summary = {
-    id: existingIndex >= 0 ? state.sessionHistory[existingIndex].id : uid(),
-    sessionId: state.session.sessionId,
-    routineId: state.session.routineId,
-    routineName: routine?.name || "",
-    date: datePartFromIso(state.session.startedAt) || todayLocal(),
-    startedAt: state.session.startedAt,
-    endedAt,
-    durationSeconds: getSessionDurationSeconds(state),
-    totalSets: entries.length,
-    workingSets: entries.filter((entry) => !entry.isWarmup).length,
-    warmupSets: entries.filter((entry) => entry.isWarmup).length,
-    exercisesCompleted: effectiveCompleted,
-    volume: calcVolumeFromEntries(entries),
-    notes: state.session.notes || ""
+  const legacyGoals = raw.goals || {};
+  base.goals = {
+    athleteName: String(legacyGoals.athleteName || base.goals.athleteName || "").trim(),
+    focusGoal: String(legacyGoals.focusGoal || base.goals.focusGoal || "").trim(),
+    goalDate: String(legacyGoals.goalDate || base.goals.goalDate || "").trim(),
+    resultGoals: {
+      bodyWeight: legacyGoals.resultGoals?.bodyWeight ?? legacyGoals.weightGoal ?? base.goals.resultGoals.bodyWeight ?? "",
+      waist: legacyGoals.resultGoals?.waist ?? legacyGoals.waistGoal ?? base.goals.resultGoals.waist ?? "",
+      bodyFat: legacyGoals.resultGoals?.bodyFat ?? legacyGoals.bodyFatGoal ?? base.goals.resultGoals.bodyFat ?? "",
+      bench: legacyGoals.resultGoals?.bench ?? legacyGoals.benchGoal ?? base.goals.resultGoals.bench ?? "",
+      squat: legacyGoals.resultGoals?.squat ?? legacyGoals.squatGoal ?? base.goals.resultGoals.squat ?? "",
+      deadlift: legacyGoals.resultGoals?.deadlift ?? legacyGoals.deadliftGoal ?? base.goals.resultGoals.deadlift ?? ""
+    },
+    habits: {
+      workoutsPerWeek: legacyGoals.habits?.workoutsPerWeek ?? "",
+      sleepHours: legacyGoals.habits?.sleepHours ?? "",
+      measureEveryDays: legacyGoals.habits?.measureEveryDays ?? "",
+      minimumStreakDays: legacyGoals.habits?.minimumStreakDays ?? ""
+    }
   };
 
-  if (existingIndex >= 0) state.sessionHistory[existingIndex] = summary;
-  else state.sessionHistory.push(summary);
+  base.preferences = {
+    ...defaultState().preferences,
+    ...(raw.preferences || {})
+  };
 
-  syncSessionHistoryEntry(state, state.session.sessionId);
-  discardActiveSession(state);
+  base.workouts = Array.isArray(base.workouts) ? base.workouts.map((item) => normalizeWorkoutRecord({
+    id: item.id || uid(),
+    date: item.date || todayLocal(),
+    routineId: item.routineId || "",
+    sessionId: item.sessionId || "",
+    exercise: String(item.exercise || item.exerciseName || "").trim(),
+    weight: safeNumber(item.weight, 0),
+    sets: item.sessionId ? 1 : Math.max(1, safeNumber(item.sets, 1)),
+    reps: Math.max(1, safeNumber(item.reps, 1)),
+    rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
+    rest: optionalNumber(item.rest, { min: 0 }),
+    tempo: String(item.tempo || "").trim(),
+    notes: String(item.notes || "").trim(),
+    isWarmup: Boolean(item.isWarmup),
+    source: item.source || (item.sessionId ? "session" : "manual"),
+    createdAt: item.createdAt || item.loggedAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || item.loggedAt || new Date().toISOString()
+  })) : [];
 
-  return { ok: true, message: "Sesión guardada y cerrada.", totalRecords: workoutRecords.length };
+  base.measurements = Array.isArray(base.measurements) ? base.measurements.map((item) => ({
+    id: item.id || uid(),
+    date: item.date || todayLocal(),
+    bodyWeight: numOrBlank(item.bodyWeight),
+    bodyFat: numOrBlank(item.bodyFat),
+    waist: numOrBlank(item.waist),
+    chest: numOrBlank(item.chest),
+    arm: numOrBlank(item.arm),
+    thigh: numOrBlank(item.thigh),
+    hips: numOrBlank(item.hips),
+    neck: numOrBlank(item.neck),
+    sleepHours: numOrBlank(item.sleepHours),
+    notes: String(item.notes || "").trim(),
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
+  })) : [];
+
+  base.routines = Array.isArray(base.routines) ? base.routines.map((routine) => ({
+    id: routine.id || uid(),
+    name: String(routine.name || "").trim(),
+    day: String(routine.day || "").trim(),
+    focus: String(routine.focus || "").trim(),
+    notes: String(routine.notes || "").trim(),
+    createdAt: routine.createdAt || new Date().toISOString(),
+    updatedAt: routine.updatedAt || routine.createdAt || new Date().toISOString(),
+    exercises: Array.isArray(routine.exercises)
+      ? routine.exercises.map((exercise) => normalizeRoutineExercise({
+        id: exercise.id || uid(),
+        name: String(exercise.name || "").trim(),
+        sets: Number(exercise.sets || 0),
+        reps: String(exercise.reps || "").trim(),
+        rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+        block: String(exercise.block || "").trim(),
+        notes: String(exercise.notes || "").trim(),
+        createdAt: exercise.createdAt || new Date().toISOString()
+      }))
+      : []
+  })) : [];
+
+  base.sessionHistory = Array.isArray(base.sessionHistory) ? base.sessionHistory.map((item) => ({
+    id: item.id || uid(),
+    sessionId: item.sessionId || uid(),
+    routineId: item.routineId || "",
+    routineName: String(item.routineName || "").trim(),
+    date: item.date || todayLocal(),
+    startedAt: item.startedAt || "",
+    endedAt: item.endedAt || "",
+    durationSeconds: Number(item.durationSeconds || 0),
+    totalSets: Number(item.totalSets || 0),
+    workingSets: Number(item.workingSets || item.totalSets || 0),
+    warmupSets: Number(item.warmupSets || 0),
+    exercisesCompleted: Number(item.exercisesCompleted || 0),
+    volume: Number(item.volume || 0),
+    notes: String(item.notes || "").trim()
+  })) : [];
+
+  base.session = {
+    active: Boolean(base.session?.active),
+    sessionId: base.session?.sessionId || "",
+    routineId: base.session?.routineId || "",
+    startedAt: base.session?.startedAt || "",
+    endedAt: base.session?.endedAt || "",
+    completedExerciseIds: Array.isArray(base.session?.completedExerciseIds) ? [...new Set(base.session.completedExerciseIds)] : [],
+    skippedExerciseIds: Array.isArray(base.session?.skippedExerciseIds) ? [...new Set(base.session.skippedExerciseIds)] : [],
+    currentExerciseId: base.session?.currentExerciseId || "",
+    notes: String(base.session?.notes || ""),
+    lastDeletedSet: base.session?.lastDeletedSet || null,
+    restTimerEndsAt: base.session?.restTimerEndsAt || "",
+    setEntries: Array.isArray(base.session?.setEntries)
+      ? base.session.setEntries.map((entry) => normalizeWorkoutRecord({
+        id: entry.id || uid(),
+        exerciseId: entry.exerciseId || "",
+        exerciseName: entry.exerciseName || entry.exercise || "",
+        exercise: entry.exerciseName || entry.exercise || "",
+        exerciseKey: entry.exerciseKey || "",
+        muscleGroup: entry.muscleGroup || "",
+        movementPattern: entry.movementPattern || "",
+        weight: safeNumber(entry.weight, 0),
+        reps: Math.max(1, safeNumber(entry.reps, 1)),
+        rpe: optionalNumber(entry.rpe, { min: 1, max: 10 }),
+        rest: optionalNumber(entry.rest, { min: 0 }),
+        isWarmup: Boolean(entry.isWarmup),
+        createdAt: entry.createdAt || new Date().toISOString(),
+        updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
+        sets: 1,
+        date: entry.date || todayLocal(),
+        routineId: base.session?.routineId || "",
+        sessionId: base.session?.sessionId || "",
+        source: "session",
+        notes: String(entry.notes || "")
+      })).map((entry) => ({
+        id: entry.id,
+        exerciseId: entry.exerciseId,
+        exerciseName: entry.exercise,
+        exerciseKey: entry.exerciseKey,
+        muscleGroup: entry.muscleGroup,
+        movementPattern: entry.movementPattern,
+        weight: entry.weight,
+        reps: entry.reps,
+        rpe: entry.rpe,
+        rest: entry.rest,
+        isWarmup: entry.isWarmup,
+        createdAt: entry.createdAt,
+        notes: entry.notes || ""
+      }))
+      : []
+  };
+  if (base.session.active) {
+    const activeRoutine = base.routines.find((routine) => routine.id === base.session.routineId);
+    const validExerciseIds = new Set((activeRoutine?.exercises || []).map((exercise) => exercise.id));
+    base.session.setEntries = base.session.setEntries.filter((entry) => validExerciseIds.has(entry.exerciseId));
+    if (!activeRoutine) {
+      base.session.active = false;
+      base.session.setEntries = [];
+      base.session.completedExerciseIds = [];
+      base.session.skippedExerciseIds = [];
+    }
+  }
+
+  base.ui = {
+    ...defaultState().ui,
+    ...(raw.ui || {})
+  };
+
+  if (!base.ui.dashboardExerciseMetric) base.ui.dashboardExerciseMetric = "e1rm";
+  if (!base.ui.dashboardMetric) base.ui.dashboardMetric = "bodyWeight";
+  if (!base.ui.chartAggregation) base.ui.chartAggregation = "day";
+  if (!base.ui.logRoutine) base.ui.logRoutine = "all";
+  if (!base.ui.logSort) base.ui.logSort = "date_desc";
+  if (!base.ui.logSource) base.ui.logSource = "all";
+  if (!base.ui.logMuscle) base.ui.logMuscle = "all";
+  if (!base.ui.logDatePreset) base.ui.logDatePreset = "all";
+  if (base.ui.activeTab === "tab-dashboard") base.ui.activeTab = "dashboard";
+  if (base.ui.activeTab === "tab-session") base.ui.activeTab = "session";
+  if (![ "dashboard", "session", "logs", "more", "routines", "measurements", "analytics", "goals", "settings" ].includes(base.ui.activeTab)) {
+    base.ui.activeTab = "dashboard";
+  }
+  if (!base.ui.moreSection) base.ui.moreSection = "routines";
+
+  return base;
+}
+
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    request.onerror = () => reject(request.error);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(DB_STORE)) {
+        database.createObjectStore(DB_STORE);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+function idbGet(db, key) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readonly");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.get(key);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result || null);
+  });
+}
+
+function idbSet(db, key, value) {
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(DB_STORE, "readwrite");
+    const store = transaction.objectStore(DB_STORE);
+    const request = store.put(safeClone(value), key);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve();
+  });
 }
