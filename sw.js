@@ -1,38 +1,74 @@
-# GymFlow Pro
+const CACHE_NAME = "gymflow-pro-cache-v8-fixed-2";
+const CORE_ASSETS = [
+  "./",
+  "./index.html",
+  "./styles.css",
+  "./app.js",
+  "./analytics.js",
+  "./catalog.js",
+  "./session.js",
+  "./store.js",
+  "./pwa.js",
+  "./ui-common.js",
+  "./ui-dashboard.js",
+  "./ui-meta.js",
+  "./ui-records.js",
+  "./ui-session.js",
+  "./utils.js",
+  "./manifest.webmanifest",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png"
+];
 
-Versión pulida de GymFlow Pro con foco en entrenar rápido, mantener la sesión activa como eje del producto y reducir fricción real en móvil.
+self.addEventListener("install", (event) => {
+  event.waitUntil(
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
+  );
+});
 
-## Qué mejora esta versión
-- CTA principal de **continuar sesión** mucho más claro cuando ya hay un entrenamiento en curso.
-- Cambio de rutina tratado como acción secundaria y más segura.
-- Panel de **registro manual** con comportamiento consistente: respeta la última apertura/cierre del usuario sin reabrirse de forma confusa al rerender.
-- **Búsqueda de rutinas** alineada con el histórico: tolerante a tildes, mayúsculas y espacios.
-- Eliminación de rutinas con **confirmación más clara y deshacer inmediato**.
-- Ajustes más honestos: la app trabaja en sistema **métrico** y ya no muestra una preferencia incompleta.
-- Flujo PWA más robusto: detección de actualización pendiente y recarga controlada.
+self.addEventListener("activate", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(
+      keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+    )).then(() => self.clients.claim())
+  );
+});
 
-## Filosofía del producto
-- offline-first
-- sin backend
-- persistencia local fiable
-- móvil primero
-- rápida de usar en el gimnasio
+self.addEventListener("message", (event) => {
+  if (event.data?.type === "SKIP_WAITING") self.skipWaiting();
+});
 
-## Estructura
-- `index.html`
-- `styles.css`
-- `app.js`
-- `manifest.webmanifest`
-- `sw.js`
-- `js/`
-- `icons/`
+self.addEventListener("fetch", (event) => {
+  const request = event.request;
+  if (request.method !== "GET") return;
 
-## Cómo probarla
-```bash
-python -m http.server 4173
-```
+  const url = new URL(request.url);
+  if (url.origin !== self.location.origin) return;
 
-Abre:
-```bash
-http://localhost:4173
-```
+  if (request.mode === "navigate") {
+    event.respondWith(
+      fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => caches.match("./index.html"))
+    );
+    return;
+  }
+
+  event.respondWith(
+    caches.match(request).then((cached) => {
+      const networkFetch = fetch(request)
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(request, copy)).catch(() => {});
+          return response;
+        })
+        .catch(() => cached);
+
+      return cached || networkFetch;
+    })
+  );
+});

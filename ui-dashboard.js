@@ -1,433 +1,205 @@
-import { mergeDeep, numOrBlank, optionalNumber, safeClone, safeNumber, uid, todayLocal, FALLBACK_REST_SECONDS } from "./utils.js";
-import { normalizeRoutineExercise, normalizeWorkoutRecord } from "./catalog.js";
+import {
+  BODY_METRIC_LABELS,
+  buildBodyChartPoints,
+  buildExerciseChartPoints,
+  buildRecentActivity,
+  buildTrendItems,
+  computeStats,
+  detectPotentialStall,
+  getSuggestedRoutine
+} from "./analytics.js";
+import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
+import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
-const DB_NAME = "gymflow-pro-db";
-const DB_VERSION = 1;
-const DB_STORE = "app_state";
-const DB_KEY = "state";
-const FALLBACK_STORAGE_KEY = "gymflow-pro-fallback";
-const LEGACY_STORAGE_KEYS = [
-  FALLBACK_STORAGE_KEY,
-  "gymflow-pro-v6-fallback",
-  "gymflow-pro-v5-fallback",
-  "gymflow-pro-v4-data",
-  "gymflow-pro-v3-data"
-];
-
-export function defaultState() {
-  return {
-    version: 8,
-    workouts: [],
-    measurements: [],
-    routines: [],
-    sessionHistory: [],
-    goals: {
-      athleteName: "",
-      focusGoal: "",
-      goalDate: "",
-      resultGoals: {
-        bodyWeight: "",
-        waist: "",
-        bodyFat: "",
-        bench: "",
-        squat: "",
-        deadlift: ""
-      },
-      habits: {
-        workoutsPerWeek: "",
-        sleepHours: "",
-        measureEveryDays: "",
-        minimumStreakDays: ""
-      }
-    },
-    preferences: {
-      units: "metric",
-      defaultRestSeconds: FALLBACK_REST_SECONDS,
-      suggestionIncrement: 2.5,
-      autoStartRest: true,
-      keepScreenAwake: false,
-      showWarmupsInLogs: true,
-      enableVibration: true,
-      collapseManualLog: true
-    },
-    session: {
-      active: false,
-      sessionId: "",
-      routineId: "",
-      startedAt: "",
-      endedAt: "",
-      completedExerciseIds: [],
-      skippedExerciseIds: [],
-      currentExerciseId: "",
-      notes: "",
-      setEntries: [],
-      lastDeletedSet: null,
-      restTimerEndsAt: ""
-    },
-    ui: {
-      activeTab: "dashboard",
-      editingWorkoutId: "",
-      editingRoutineId: "",
-      editingMeasurementId: "",
-      editingGroupId: "",
-      routineSearch: "",
-      routineDayFilter: "all",
-      dashboardExerciseId: "",
-      dashboardExerciseMetric: "e1rm",
-      dashboardMetric: "bodyWeight",
-      chartAggregation: "day",
-      analyticsLiftId: "",
-      logSearch: "",
-      logRoutine: "all",
-      logSort: "date_desc",
-      logSource: "all",
-      logMuscle: "all",
-      logDatePreset: "all",
-      sessionManualOpen: null,
-      settingsAdvancedOpen: false,
-      logFiltersOpen: false,
-      moreSection: "routines"
-    },
-    meta: {
-      saveStatus: "saved",
-      lastSavedAt: "",
-      storageMode: "indexeddb"
-    }
-  };
+export function renderStats(state, els) {
+  const stats = computeStats(state);
+  els.statSessionsMonth.textContent = stats.daysTrainedThisMonth;
+  els.statStreak.textContent = String(stats.continuityActive);
+  els.statWeight.textContent = stats.latestMeasurement?.bodyWeight !== "" && stats.latestMeasurement?.bodyWeight != null ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
+  els.statBestLift.textContent = stats.bestLift ? `${formatNumber(stats.bestLift.weight)} kg` : "—";
+  els.statBestLiftLabel.textContent = stats.bestLift ? stats.bestLift.exercise : "Sin datos";
+  els.statBestE1rm.textContent = stats.bestE1rm ? `${formatNumber(stats.bestE1rm.value)} kg` : "—";
+  els.statBestE1rmLabel.textContent = stats.bestE1rm ? stats.bestE1rm.item.exercise : "Estimado";
 }
 
-export async function createStore(saveStatusEl) {
-  let db = null;
-  let state = defaultState();
-  let saveTimeout = null;
-  let saveInFlight = Promise.resolve();
-
-  try {
-    db = await openDb();
-    const stored = await idbGet(db, DB_KEY);
-    if (stored) state = migrateState(stored);
-  } catch (error) {
-    console.warn("IndexedDB no disponible, se intentará usar almacenamiento de respaldo.", error);
-  }
-
-  if (!state.workouts.length && !state.measurements.length && !state.routines.length) {
-    for (const key of LEGACY_STORAGE_KEYS) {
-      try {
-        const raw = localStorage.getItem(key);
-        if (!raw) continue;
-        state = migrateState(JSON.parse(raw));
-        break;
-      } catch (error) {
-        console.warn("No se pudo leer almacenamiento legado", key, error);
-      }
-    }
-  }
-
-  const store = {
-    get state() {
-      return state;
-    },
-    set state(nextState) {
-      state = migrateState(nextState);
-    },
-    queueSave,
-    flushSave,
-    markSaved,
-    updateSaveIndicator,
-    isUsingFallback() {
-      return state.meta.storageMode !== "indexeddb";
-    }
-  };
-
-  updateSaveIndicator("saved");
-  return store;
-
-  function updateSaveIndicator(status) {
-    state.meta.saveStatus = status;
-    if (!saveStatusEl) return;
-    saveStatusEl.dataset.state = status;
-    const labels = {
-      dirty: "Pendiente",
-      saving: "Guardando…",
-      saved: state.meta.lastSavedAt ? `Guardado ${new Date(state.meta.lastSavedAt).toLocaleTimeString("es-ES", { hour: "2-digit", minute: "2-digit" })}` : "Guardado",
-      degraded: "Guardado local",
-      error: "Error al guardar"
-    };
-    saveStatusEl.textContent = labels[status] || "Guardado";
-  }
-
-  function markSaved(mode = db ? "indexeddb" : "localStorage") {
-    state.meta.lastSavedAt = new Date().toISOString();
-    state.meta.storageMode = mode;
-    updateSaveIndicator(mode === "indexeddb" ? "saved" : "degraded");
-  }
-
-  function queueSave() {
-    updateSaveIndicator("dirty");
-    clearTimeout(saveTimeout);
-    saveTimeout = setTimeout(() => {
-      saveInFlight = saveInFlight.then(() => persist());
-    }, 160);
-  }
-
-  async function flushSave() {
-    clearTimeout(saveTimeout);
-    await saveInFlight;
-    await persist();
-  }
-
-  async function persist() {
-    updateSaveIndicator("saving");
-    const snapshot = safeClone(state);
-    try {
-      localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch (error) {
-      console.warn("No se pudo actualizar el respaldo en localStorage", error);
-    }
-
-    if (!db) {
-      markSaved("localStorage");
-      return;
-    }
-
-    try {
-      await idbSet(db, DB_KEY, snapshot);
-      markSaved("indexeddb");
-    } catch (error) {
-      console.error("No se pudo guardar en IndexedDB", error);
-      try {
-        localStorage.setItem(FALLBACK_STORAGE_KEY, JSON.stringify(snapshot));
-        markSaved("localStorage");
-      } catch (fallbackError) {
-        console.error("No se pudo guardar ni siquiera el respaldo local", fallbackError);
-        updateSaveIndicator("error");
-      }
-    }
-  }
+export function renderDashboard(state, els, exerciseOptions) {
+  renderPrimaryAction(state, els);
+  renderQuickSignals(state, els);
+  renderLauncher(state, els);
+  renderRecentStory(state, els);
+  renderExerciseSelect(state, els, exerciseOptions);
+  renderExerciseChart(state, els);
+  renderBodyChart(state, els);
 }
 
-export function migrateState(rawState) {
-  const raw = rawState || {};
-  const base = mergeDeep(defaultState(), raw);
-  base.version = 8;
+function buildTodayInsight(state, suggestion) {
+  const routine = suggestion?.routine;
+  if (routine && suggestion?.daysSince != null && suggestion.daysSince >= 4) {
+    return `Llevas ${suggestion.daysSince} días sin entrenar ${routine.name}.`;
+  }
+  const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
+  if (weeklyTarget > 0) {
+    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
+      .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
+    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
+  }
+  return "Prioriza la siguiente acción y ejecuta sin fricción.";
+}
 
-  const legacyGoals = raw.goals || {};
-  base.goals = {
-    athleteName: String(legacyGoals.athleteName || base.goals.athleteName || "").trim(),
-    focusGoal: String(legacyGoals.focusGoal || base.goals.focusGoal || "").trim(),
-    goalDate: String(legacyGoals.goalDate || base.goals.goalDate || "").trim(),
-    resultGoals: {
-      bodyWeight: legacyGoals.resultGoals?.bodyWeight ?? legacyGoals.weightGoal ?? base.goals.resultGoals.bodyWeight ?? "",
-      waist: legacyGoals.resultGoals?.waist ?? legacyGoals.waistGoal ?? base.goals.resultGoals.waist ?? "",
-      bodyFat: legacyGoals.resultGoals?.bodyFat ?? legacyGoals.bodyFatGoal ?? base.goals.resultGoals.bodyFat ?? "",
-      bench: legacyGoals.resultGoals?.bench ?? legacyGoals.benchGoal ?? base.goals.resultGoals.bench ?? "",
-      squat: legacyGoals.resultGoals?.squat ?? legacyGoals.squatGoal ?? base.goals.resultGoals.squat ?? "",
-      deadlift: legacyGoals.resultGoals?.deadlift ?? legacyGoals.deadliftGoal ?? base.goals.resultGoals.deadlift ?? ""
-    },
-    habits: {
-      workoutsPerWeek: legacyGoals.habits?.workoutsPerWeek ?? "",
-      sleepHours: legacyGoals.habits?.sleepHours ?? "",
-      measureEveryDays: legacyGoals.habits?.measureEveryDays ?? "",
-      minimumStreakDays: legacyGoals.habits?.minimumStreakDays ?? ""
-    }
-  };
-
-  base.preferences = {
-    ...defaultState().preferences,
-    ...(raw.preferences || {})
-  };
-
-  base.workouts = Array.isArray(base.workouts) ? base.workouts.map((item) => normalizeWorkoutRecord({
-    id: item.id || uid(),
-    date: item.date || todayLocal(),
-    routineId: item.routineId || "",
-    sessionId: item.sessionId || "",
-    exercise: String(item.exercise || item.exerciseName || "").trim(),
-    weight: safeNumber(item.weight, 0),
-    sets: item.sessionId ? 1 : Math.max(1, safeNumber(item.sets, 1)),
-    reps: Math.max(1, safeNumber(item.reps, 1)),
-    rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
-    rest: optionalNumber(item.rest, { min: 0 }),
-    tempo: String(item.tempo || "").trim(),
-    notes: String(item.notes || "").trim(),
-    isWarmup: Boolean(item.isWarmup),
-    source: item.source || (item.sessionId ? "session" : "manual"),
-    createdAt: item.createdAt || item.loggedAt || new Date().toISOString(),
-    updatedAt: item.updatedAt || item.createdAt || item.loggedAt || new Date().toISOString()
-  })) : [];
-
-  base.measurements = Array.isArray(base.measurements) ? base.measurements.map((item) => ({
-    id: item.id || uid(),
-    date: item.date || todayLocal(),
-    bodyWeight: numOrBlank(item.bodyWeight),
-    bodyFat: numOrBlank(item.bodyFat),
-    waist: numOrBlank(item.waist),
-    chest: numOrBlank(item.chest),
-    arm: numOrBlank(item.arm),
-    thigh: numOrBlank(item.thigh),
-    hips: numOrBlank(item.hips),
-    neck: numOrBlank(item.neck),
-    sleepHours: numOrBlank(item.sleepHours),
-    notes: String(item.notes || "").trim(),
-    createdAt: item.createdAt || new Date().toISOString(),
-    updatedAt: item.updatedAt || item.createdAt || new Date().toISOString()
-  })) : [];
-
-  base.routines = Array.isArray(base.routines) ? base.routines.map((routine) => ({
-    id: routine.id || uid(),
-    name: String(routine.name || "").trim(),
-    day: String(routine.day || "").trim(),
-    focus: String(routine.focus || "").trim(),
-    notes: String(routine.notes || "").trim(),
-    createdAt: routine.createdAt || new Date().toISOString(),
-    updatedAt: routine.updatedAt || routine.createdAt || new Date().toISOString(),
-    exercises: Array.isArray(routine.exercises)
-      ? routine.exercises.map((exercise) => normalizeRoutineExercise({
-        id: exercise.id || uid(),
-        name: String(exercise.name || "").trim(),
-        sets: Number(exercise.sets || 0),
-        reps: String(exercise.reps || "").trim(),
-        rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
-        block: String(exercise.block || "").trim(),
-        notes: String(exercise.notes || "").trim(),
-        createdAt: exercise.createdAt || new Date().toISOString()
-      }))
-      : []
-  })) : [];
-
-  base.sessionHistory = Array.isArray(base.sessionHistory) ? base.sessionHistory.map((item) => ({
-    id: item.id || uid(),
-    sessionId: item.sessionId || uid(),
-    routineId: item.routineId || "",
-    routineName: String(item.routineName || "").trim(),
-    date: item.date || todayLocal(),
-    startedAt: item.startedAt || "",
-    endedAt: item.endedAt || "",
-    durationSeconds: Number(item.durationSeconds || 0),
-    totalSets: Number(item.totalSets || 0),
-    workingSets: Number(item.workingSets || item.totalSets || 0),
-    warmupSets: Number(item.warmupSets || 0),
-    exercisesCompleted: Number(item.exercisesCompleted || 0),
-    volume: Number(item.volume || 0),
-    notes: String(item.notes || "").trim()
-  })) : [];
-
-  base.session = {
-    active: Boolean(base.session?.active),
-    sessionId: base.session?.sessionId || "",
-    routineId: base.session?.routineId || "",
-    startedAt: base.session?.startedAt || "",
-    endedAt: base.session?.endedAt || "",
-    completedExerciseIds: Array.isArray(base.session?.completedExerciseIds) ? [...new Set(base.session.completedExerciseIds)] : [],
-    skippedExerciseIds: Array.isArray(base.session?.skippedExerciseIds) ? [...new Set(base.session.skippedExerciseIds)] : [],
-    currentExerciseId: base.session?.currentExerciseId || "",
-    notes: String(base.session?.notes || ""),
-    lastDeletedSet: base.session?.lastDeletedSet || null,
-    restTimerEndsAt: base.session?.restTimerEndsAt || "",
-    setEntries: Array.isArray(base.session?.setEntries)
-      ? base.session.setEntries.map((entry) => normalizeWorkoutRecord({
-        id: entry.id || uid(),
-        exerciseId: entry.exerciseId || "",
-        exerciseName: entry.exerciseName || entry.exercise || "",
-        exercise: entry.exerciseName || entry.exercise || "",
-        exerciseKey: entry.exerciseKey || "",
-        muscleGroup: entry.muscleGroup || "",
-        movementPattern: entry.movementPattern || "",
-        weight: safeNumber(entry.weight, 0),
-        reps: Math.max(1, safeNumber(entry.reps, 1)),
-        rpe: optionalNumber(entry.rpe, { min: 1, max: 10 }),
-        rest: optionalNumber(entry.rest, { min: 0 }),
-        isWarmup: Boolean(entry.isWarmup),
-        createdAt: entry.createdAt || new Date().toISOString(),
-        updatedAt: entry.updatedAt || entry.createdAt || new Date().toISOString(),
-        sets: 1,
-        date: entry.date || todayLocal(),
-        routineId: base.session?.routineId || "",
-        sessionId: base.session?.sessionId || "",
-        source: "session",
-        notes: String(entry.notes || "")
-      })).map((entry) => ({
-        id: entry.id,
-        exerciseId: entry.exerciseId,
-        exerciseName: entry.exercise,
-        exerciseKey: entry.exerciseKey,
-        muscleGroup: entry.muscleGroup,
-        movementPattern: entry.movementPattern,
-        weight: entry.weight,
-        reps: entry.reps,
-        rpe: entry.rpe,
-        rest: entry.rest,
-        isWarmup: entry.isWarmup,
-        createdAt: entry.createdAt,
-        notes: entry.notes || ""
-      }))
-      : []
-  };
-  if (base.session.active) {
-    const activeRoutine = base.routines.find((routine) => routine.id === base.session.routineId);
-    const validExerciseIds = new Set((activeRoutine?.exercises || []).map((exercise) => exercise.id));
-    base.session.setEntries = base.session.setEntries.filter((entry) => validExerciseIds.has(entry.exerciseId));
-    if (!activeRoutine) {
-      base.session.active = false;
-      base.session.setEntries = [];
-      base.session.completedExerciseIds = [];
-      base.session.skippedExerciseIds = [];
-    }
+function renderPrimaryAction(state, els) {
+  const suggestion = getSuggestedRoutine(state);
+  const active = state.session.active;
+  if (active) {
+    const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
+    const routine = state.routines.find((item) => item.id === state.session.routineId);
+    const nextExercise = routine?.exercises?.find((exercise) => !state.session.completedExerciseIds.includes(exercise.id) && !(state.session.skippedExerciseIds || []).includes(exercise.id)) || routine?.exercises?.[0] || null;
+    els.dashboardPrimaryCard.innerHTML = `
+      <div class="hero-copy">
+        <span class="pill">Sesión activa</span>
+        <h2>Continúa ${routine?.name || "tu entrenamiento"}</h2>
+        <p class="today-insight">${nextExercise ? `Toca seguir con ${nextExercise.name}.` : buildTodayInsight(state, suggestion)}</p>
+        <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
+      </div>
+      <div class="hero-actions hero-actions--stack-mobile">
+        <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
+        <button class="ghost" data-action="open-tab" data-id="routines">Elegir otra rutina</button>
+      </div>
+    `;
+    return;
   }
 
-  base.ui = {
-    ...defaultState().ui,
-    ...(raw.ui || {})
-  };
-
-  if (!base.ui.dashboardExerciseMetric) base.ui.dashboardExerciseMetric = "e1rm";
-  if (!base.ui.dashboardMetric) base.ui.dashboardMetric = "bodyWeight";
-  if (!base.ui.chartAggregation) base.ui.chartAggregation = "day";
-  if (!base.ui.logRoutine) base.ui.logRoutine = "all";
-  if (!base.ui.logSort) base.ui.logSort = "date_desc";
-  if (!base.ui.logSource) base.ui.logSource = "all";
-  if (!base.ui.logMuscle) base.ui.logMuscle = "all";
-  if (!base.ui.logDatePreset) base.ui.logDatePreset = "all";
-  if (base.ui.activeTab === "tab-dashboard") base.ui.activeTab = "dashboard";
-  if (base.ui.activeTab === "tab-session") base.ui.activeTab = "session";
-  if (![ "dashboard", "session", "logs", "more", "routines", "measurements", "analytics", "goals", "settings" ].includes(base.ui.activeTab)) {
-    base.ui.activeTab = "dashboard";
+  if (!suggestion.routine) {
+    els.dashboardPrimaryCard.innerHTML = `
+      <div class="hero-copy">
+        <span class="pill">Primer paso</span>
+        <h2>Prepara tu primera rutina</h2>
+        <p>GymFlow Pro está lista para entrenar. Crea una rutina o carga demo para empezar en menos de un minuto.</p>
+      </div>
+      <div class="hero-actions hero-actions--stack-mobile">
+        <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>
+        <button class="ghost" data-action="load-demo">Cargar demo</button>
+      </div>
+    `;
+    return;
   }
-  if (!base.ui.moreSection) base.ui.moreSection = "routines";
 
-  return base;
+  const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
+  els.dashboardPrimaryCard.innerHTML = `
+    <div class="hero-copy">
+      <span class="pill">Recomendación</span>
+      <h2>Entrena ${suggestion.routine.name} ahora</h2>
+      <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
+      <p>${suggestion.reason} ${lastLabel}.</p>
+    </div>
+    <div class="hero-actions hero-actions--stack-mobile">
+      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
+      <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
+    </div>
+  `;
 }
 
-function openDb() {
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onerror = () => reject(request.error);
-    request.onupgradeneeded = () => {
-      const database = request.result;
-      if (!database.objectStoreNames.contains(DB_STORE)) {
-        database.createObjectStore(DB_STORE);
-      }
-    };
-    request.onsuccess = () => resolve(request.result);
-  });
+function renderLauncher(state, els) {
+  const suggestion = getSuggestedRoutine(state);
+  const cards = [];
+  if (state.session.active) {
+    const routine = state.routines.find((item) => item.id === state.session.routineId);
+    cards.push(cardHtml({
+      title: "Continuar sesión",
+      subtitle: routine ? `Rutina activa: ${routine.name}.` : "Retoma exactamente donde te quedaste.",
+      chips: [{ label: "Prioridad alta", type: "success" }],
+      footer: `<button data-action="continue-session">Abrir sesión</button>`
+    }));
+  } else if (suggestion.routine) {
+    cards.push(cardHtml({
+      title: `Arrancar ${suggestion.routine.name}`,
+      subtitle: suggestion.reason,
+      chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
+      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
+    }));
+  }
+
+  cards.push(cardHtml({
+    title: "Check-in corporal",
+    subtitle: "Registra peso, cintura o sueño para mantener contexto.",
+    chips: [{ label: "30 segundos", type: "ghost" }],
+    footer: `<button class="ghost small" data-action="open-tab" data-id="measurements">Log medida</button>`
+  }));
+
+  els.recommendedRoutine.innerHTML = cards.join("");
 }
 
-function idbGet(db, key) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readonly");
-    const store = transaction.objectStore(DB_STORE);
-    const request = store.get(key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result || null);
-  });
+function renderQuickSignals(state, els) {
+  const trendItems = buildTrendItems(state);
+  const stalledExercise = detectPotentialStall(state)[0] || null;
+  const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
+  if (stalledExercise) {
+    cards.push(cardHtml({
+      title: `Posible estancamiento`,
+      subtitle: `${stalledExercise.exercise} lleva varias referencias planas.`,
+      chips: [
+        { label: `e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
+        { label: formatDate(stalledExercise.date), type: "ghost" }
+      ]
+    }));
+  }
+  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
 }
 
-function idbSet(db, key, value) {
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(DB_STORE, "readwrite");
-    const store = transaction.objectStore(DB_STORE);
-    const request = store.put(safeClone(value), key);
-    request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve();
-  });
+function renderRecentStory(state, els) {
+  const cards = buildRecentActivity(state, 6).map((item) => cardHtml({
+    title: item.title,
+    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : `Registro manual · ${item.subtitle}`}`,
+    chips: item.kind === "session"
+      ? [
+        { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
+        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" },
+        ...(item.notes ? [{ label: "Incluye notas", type: "warning" }] : [])
+      ]
+      : [
+        { label: item.routineName || "Registro manual", type: "ghost" },
+        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
+        ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
+      ],
+    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
+  }));
+  els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
+}
+
+function renderExerciseSelect(state, els, exerciseOptions) {
+  if (!exerciseOptions.length) {
+    els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
+    state.ui.dashboardExerciseId = "";
+    return;
+  }
+
+  if (!state.ui.dashboardExerciseId || !exerciseOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
+    state.ui.dashboardExerciseId = exerciseOptions[0].id;
+  }
+
+  els.dashboardExerciseSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+  els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
+  els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
+  els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
+  if (els.chartAggregationSelect) els.chartAggregationSelect.value = state.ui.chartAggregation || "day";
+}
+
+function renderExerciseChart(state, els) {
+  const metric = state.ui.dashboardExerciseMetric || "e1rm";
+  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
+  const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
+  const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
+  els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
+}
+
+function renderBodyChart(state, els) {
+  const metric = state.ui.dashboardMetric || "bodyWeight";
+  const points = buildBodyChartPoints(state, metric);
+  const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? " h" : metric === "bodyWeight" ? " kg" : " cm";
+  const label = BODY_METRIC_LABELS[metric] || "Métrica corporal";
+  const latest = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  els.bodyChart.innerHTML = points.length >= 2
+    ? `${latest ? `<div class="mini-insight">Última lectura: ${latest[metric] !== "" && latest[metric] != null ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
+    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
 }

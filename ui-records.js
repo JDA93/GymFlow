@@ -1,205 +1,218 @@
-import {
-  BODY_METRIC_LABELS,
-  buildBodyChartPoints,
-  buildExerciseChartPoints,
-  buildRecentActivity,
-  buildTrendItems,
-  computeStats,
-  detectPotentialStall,
-  getSuggestedRoutine
-} from "./analytics.js";
-import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
-import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
+import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics.js";
+import { cardHtml, emptyHtml } from "./ui-common.js";
+import { formatCompactDelta, formatDate, formatDuration, formatNumber, normalizeNameForMatch, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
-export function renderStats(state, els) {
-  const stats = computeStats(state);
-  els.statSessionsMonth.textContent = stats.daysTrainedThisMonth;
-  els.statStreak.textContent = String(stats.continuityActive);
-  els.statWeight.textContent = stats.latestMeasurement?.bodyWeight !== "" && stats.latestMeasurement?.bodyWeight != null ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
-  els.statBestLift.textContent = stats.bestLift ? `${formatNumber(stats.bestLift.weight)} kg` : "—";
-  els.statBestLiftLabel.textContent = stats.bestLift ? stats.bestLift.exercise : "Sin datos";
-  els.statBestE1rm.textContent = stats.bestE1rm ? `${formatNumber(stats.bestE1rm.value)} kg` : "—";
-  els.statBestE1rmLabel.textContent = stats.bestE1rm ? stats.bestE1rm.item.exercise : "Estimado";
-}
+export function renderRoutines(state, els) {
+  const search = normalizeNameForMatch(String(state.ui.routineSearch || ""));
+  const dayFilter = state.ui.routineDayFilter || "all";
+  const activeRoutineId = state.session.active ? state.session.routineId : "";
 
-export function renderDashboard(state, els, exerciseOptions) {
-  renderPrimaryAction(state, els);
-  renderQuickSignals(state, els);
-  renderLauncher(state, els);
-  renderRecentStory(state, els);
-  renderExerciseSelect(state, els, exerciseOptions);
-  renderExerciseChart(state, els);
-  renderBodyChart(state, els);
-}
+  const routines = state.routines.filter((routine) => {
+    const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
+    if (!dayMatches) return false;
+    if (!search) return true;
+    const haystack = [
+      routine.name,
+      routine.day,
+      routine.focus,
+      routine.notes,
+      ...(routine.exercises || []).flatMap((item) => [item.name, item.block, item.notes, item.muscleGroup])
+    ].filter(Boolean).join(" ");
+    return normalizeNameForMatch(haystack).includes(search);
+  });
 
-function buildTodayInsight(state, suggestion) {
-  const routine = suggestion?.routine;
-  if (routine && suggestion?.daysSince != null && suggestion.daysSince >= 4) {
-    return `Llevas ${suggestion.daysSince} días sin entrenar ${routine.name}.`;
+  if (els.routineFilterSummary) {
+    const bits = [];
+    if (search) bits.push(`búsqueda "${String(state.ui.routineSearch || "").trim()}"`);
+    if (dayFilter !== "all") bits.push(`bloque ${dayFilter}`);
+    els.routineFilterSummary.textContent = bits.length
+      ? `${routines.length} rutinas visibles · filtros: ${bits.join(" · ")}.`
+      : `${routines.length} rutinas disponibles en biblioteca.`;
   }
-  const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
-  if (weeklyTarget > 0) {
-    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
-      .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
-  }
-  return "Prioriza la siguiente acción y ejecuta sin fricción.";
-}
 
-function renderPrimaryAction(state, els) {
-  const suggestion = getSuggestedRoutine(state);
-  const active = state.session.active;
-  if (active) {
-    const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
-    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
-    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
-    const nextExercise = routine?.exercises?.find((exercise) => !state.session.completedExerciseIds.includes(exercise.id) && !(state.session.skippedExerciseIds || []).includes(exercise.id)) || routine?.exercises?.[0] || null;
-    els.dashboardPrimaryCard.innerHTML = `
-      <div class="hero-copy">
-        <span class="pill">Sesión activa</span>
-        <h2>Continúa ${routine?.name || "tu entrenamiento"}</h2>
-        <p class="today-insight">${nextExercise ? `Toca seguir con ${nextExercise.name}.` : buildTodayInsight(state, suggestion)}</p>
-        <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
-      </div>
-      <div class="hero-actions hero-actions--stack-mobile">
-        <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
-        <button class="ghost" data-action="open-tab" data-id="routines">Elegir otra rutina</button>
-      </div>
-    `;
+  if (!routines.length) {
+    els.routineList.innerHTML = emptyHtml(state.routines.length ? "No hay rutinas que coincidan con los filtros." : "No hay rutinas todavía.");
     return;
   }
 
-  if (!suggestion.routine) {
-    els.dashboardPrimaryCard.innerHTML = `
-      <div class="hero-copy">
-        <span class="pill">Primer paso</span>
-        <h2>Prepara tu primera rutina</h2>
-        <p>GymFlow Pro está lista para entrenar. Crea una rutina o carga demo para empezar en menos de un minuto.</p>
-      </div>
-      <div class="hero-actions hero-actions--stack-mobile">
-        <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>
-        <button class="ghost" data-action="load-demo">Cargar demo</button>
-      </div>
+  els.routineList.innerHTML = routines.map((routine) => {
+    const meta = buildRoutineMetadata(state, routine);
+    const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
+    const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
+    const isActive = activeRoutineId === routine.id;
+    const lastUsedLabel = meta.lastDate ? `${formatDate(meta.lastDate)} · ${relativeDaysLabel(daysBetween(meta.lastDate, todayLocal()))}` : "Aún sin usar";
+    return `
+      <article class="list-item routine-card ${isActive ? "routine-card--active" : ""}">
+        <div class="list-head">
+          <div>
+            <h3 class="list-title">${routine.name}</h3>
+            <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
+          </div>
+          <span class="chip ${isActive ? "success" : "ghost"}">${isActive ? "Sesión activa" : lastUsedLabel}</span>
+        </div>
+        <div class="chip-row">
+          <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
+          <span class="chip ghost">${meta.totalSets} series</span>
+          <span class="chip ghost">~${estimatedMinutes} min</span>
+          <span class="chip ${meta.complexityScore >= 24 ? "warning" : meta.complexityScore >= 16 ? "success" : "ghost"}">${meta.complexityLabel}</span>
+          ${meta.blockCount ? `<span class="chip ghost">${meta.blockCount} bloques</span>` : ""}
+          ${blockPreview.map((block) => `<span class="chip ghost">${block}</span>`).join("")}
+        </div>
+        <div class="routine-preview-list">
+          ${(routine.exercises || []).slice(0, 5).map((exercise) => `
+            <div class="routine-preview-row">
+              <strong>${exercise.block ? `${exercise.block} · ` : ""}${exercise.name}</strong>
+              <span>${exercise.sets}×${exercise.reps} · ${exercise.rest}s</span>
+            </div>
+          `).join("")}
+          ${routine.exercises.length > 5 ? `<p class="helper-line">+${routine.exercises.length - 5} ejercicios más</p>` : ""}
+        </div>
+        <div class="actions-row">
+          <button data-action="start-routine" data-id="${routine.id}">${isActive ? "Continuar sesión" : "Iniciar sesión"}</button>
+          <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
+          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
+          <button class="ghost small danger-ghost" data-action="delete-routine" data-id="${routine.id}">Eliminar</button>
+        </div>
+      </article>
     `;
+  }).join("");
+}
+
+export function renderWorkoutList(state, els) {
+  const feed = buildHistoryFeed(state);
+  renderHistoryFilterSummary(state, els, feed.length);
+  if (!feed.length) {
+    els.workoutList.innerHTML = emptyHtml("No hay registros con esos filtros.");
     return;
   }
 
-  const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
-  els.dashboardPrimaryCard.innerHTML = `
-    <div class="hero-copy">
-      <span class="pill">Recomendación</span>
-      <h2>Entrena ${suggestion.routine.name} ahora</h2>
-      <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
-      <p>${suggestion.reason} ${lastLabel}.</p>
-    </div>
-    <div class="hero-actions hero-actions--stack-mobile">
-      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
-      <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
-    </div>
+  let lastDate = "";
+  els.workoutList.innerHTML = feed.map((item) => {
+    const separator = item.date !== lastDate ? `<p class="history-day-separator">${formatDate(item.date)}</p>` : "";
+    lastDate = item.date;
+    return `${separator}${item.kind === "session" ? renderSessionHistoryCard(item) : renderManualHistoryCard(item)}`;
+  }).join("");
+}
+
+function renderHistoryFilterSummary(state, els, total) {
+  if (!els.logFilterSummary) return;
+  const active = [];
+  if (state.ui.logSearch) active.push(`texto "${state.ui.logSearch}"`);
+  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina");
+  if (state.ui.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
+  if (state.ui.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
+  if (state.ui.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
+  els.logFilterSummary.textContent = active.length
+    ? `${total} resultados · filtros activos: ${active.join(" · ")}.`
+    : `${total} resultados · vista completa.`;
+}
+
+function renderSessionHistoryCard(item) {
+  return `
+    <article class="list-item history-card history-card--session">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">Sesión completa · ${item.exercisesCompleted} ejercicios · ${formatDuration(item.durationSeconds || 0)}</p>
+        </div>
+        <span class="chip success">${formatNumber(item.volume)} kg</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
+        <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
+        <span class="chip ghost">${item.exercisesCompleted ?? 0} ejercicios</span>
+        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
+      </div>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      <div class="history-session-exercises">
+        ${item.exercises.slice(0, 4).map((exercise) => `
+          <div class="history-mini-row">
+            <strong>${exercise.exercise}</strong>
+            <span>${exercise.setCount} series · ${formatNumber(exercise.maxWeight)} kg top</span>
+          </div>
+        `).join("")}
+      </div>
+      <div class="actions-row">
+        <button class="ghost small" data-action="start-routine" data-id="${item.routineId}">Repetir hoy</button>
+        <button class="ghost small" data-action="edit-session-history" data-id="${item.sessionId}">Corregir series</button>
+        <button class="ghost small danger-ghost" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
+      </div>
+    </article>
   `;
 }
 
-function renderLauncher(state, els) {
-  const suggestion = getSuggestedRoutine(state);
-  const cards = [];
-  if (state.session.active) {
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
-    cards.push(cardHtml({
-      title: "Continuar sesión",
-      subtitle: routine ? `Rutina activa: ${routine.name}.` : "Retoma exactamente donde te quedaste.",
-      chips: [{ label: "Prioridad alta", type: "success" }],
-      footer: `<button data-action="continue-session">Abrir sesión</button>`
-    }));
-  } else if (suggestion.routine) {
-    cards.push(cardHtml({
-      title: `Arrancar ${suggestion.routine.name}`,
-      subtitle: suggestion.reason,
-      chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
-      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
-    }));
-  }
-
-  cards.push(cardHtml({
-    title: "Check-in corporal",
-    subtitle: "Registra peso, cintura o sueño para mantener contexto.",
-    chips: [{ label: "30 segundos", type: "ghost" }],
-    footer: `<button class="ghost small" data-action="open-tab" data-id="measurements">Log medida</button>`
-  }));
-
-  els.recommendedRoutine.innerHTML = cards.join("");
+function renderManualHistoryCard(item) {
+  return `
+    <article class="list-item history-card history-card--manual">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">Registro manual${item.routineName ? ` · ${item.routineName}` : ""}</p>
+        </div>
+        <span class="chip ghost">${formatNumber(item.maxWeight)} kg top</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ghost">${item.setCount} series</span>
+        <span class="chip ghost">${item.repsLabel}</span>
+        <span class="chip warning">e1RM ${formatNumber(item.bestE1rm)} kg</span>
+        <span class="chip ghost">Volumen ${formatNumber(item.volume)} kg</span>
+      </div>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      <div class="actions-row">
+        <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
+        <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
+      </div>
+    </article>
+  `;
 }
 
-function renderQuickSignals(state, els) {
-  const trendItems = buildTrendItems(state);
-  const stalledExercise = detectPotentialStall(state)[0] || null;
-  const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
-  if (stalledExercise) {
-    cards.push(cardHtml({
-      title: `Posible estancamiento`,
-      subtitle: `${stalledExercise.exercise} lleva varias referencias planas.`,
-      chips: [
-        { label: `e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
-        { label: formatDate(stalledExercise.date), type: "ghost" }
-      ]
-    }));
-  }
-  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
-}
-
-function renderRecentStory(state, els) {
-  const cards = buildRecentActivity(state, 6).map((item) => cardHtml({
-    title: item.title,
-    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : `Registro manual · ${item.subtitle}`}`,
-    chips: item.kind === "session"
-      ? [
-        { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
-        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" },
-        ...(item.notes ? [{ label: "Incluye notas", type: "warning" }] : [])
-      ]
-      : [
-        { label: item.routineName || "Registro manual", type: "ghost" },
-        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
-        ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
-      ],
-    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
-  }));
-  els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
-}
-
-function renderExerciseSelect(state, els, exerciseOptions) {
-  if (!exerciseOptions.length) {
-    els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
-    state.ui.dashboardExerciseId = "";
+export function renderPrList(state, els) {
+  const items = buildPrItems(state);
+  if (!items.length) {
+    els.prList.innerHTML = emptyHtml("Sin datos todavía.");
     return;
   }
 
-  if (!state.ui.dashboardExerciseId || !exerciseOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
-    state.ui.dashboardExerciseId = exerciseOptions[0].id;
-  }
-
-  els.dashboardExerciseSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
-  els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
-  els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
-  els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
-  if (els.chartAggregationSelect) els.chartAggregationSelect.value = state.ui.chartAggregation || "day";
+  els.prList.innerHTML = items.map((item) => cardHtml({
+    title: item.exercise,
+    subtitle: `Carga ${formatNumber(item.bestWeight.weight)} kg · e1RM ${formatNumber(item.bestE1rm.weight * (1 + item.bestE1rm.reps / 30))} kg`,
+    chips: [
+      { label: `Último ${formatDate(item.latest.date)}`, type: "ghost" },
+      { label: `PR reciente ${formatDate(item.bestE1rm.date)}`, type: "ghost" },
+      { label: `${item.deltaVsPrevBest >= 0 ? "+" : ""}${formatNumber(item.deltaVsPrevBest)} kg vs PR anterior`, type: item.deltaVsPrevBest >= 0 ? "success" : "warning" }
+    ]
+  })).join("");
 }
 
-function renderExerciseChart(state, els) {
-  const metric = state.ui.dashboardExerciseMetric || "e1rm";
-  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
-  const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
-  const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
-  els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
-}
-
-function renderBodyChart(state, els) {
-  const metric = state.ui.dashboardMetric || "bodyWeight";
-  const points = buildBodyChartPoints(state, metric);
-  const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? " h" : metric === "bodyWeight" ? " kg" : " cm";
-  const label = BODY_METRIC_LABELS[metric] || "Métrica corporal";
-  const latest = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  els.bodyChart.innerHTML = points.length >= 2
-    ? `${latest ? `<div class="mini-insight">Última lectura: ${latest[metric] !== "" && latest[metric] != null ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
-    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
+export function renderMeasurements(state, els) {
+  const measurements = buildMeasurementRows(state);
+  const trendLabel = (delta) => {
+    if (delta == null) return "Sin tendencia";
+    if (Math.abs(delta) < 0.2) return "Estable";
+    return delta < 0 ? "Mejorando" : "Deriva al alza";
+  };
+  els.measurementList.innerHTML = measurements.length ? measurements.map((item) => `
+    <article class="list-item measurement-card">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${formatDate(item.date)}</h3>
+          <p class="list-subtitle">Peso ${item.bodyWeight !== "" && item.bodyWeight != null ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Cintura ${item.waist !== "" && item.waist != null ? `${formatNumber(item.waist)} cm` : "—"}</p>
+        </div>
+        <span class="chip ghost">Sueño ${item.sleepHours !== "" && item.sleepHours != null ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : `${item.deltaBodyWeight < 0 ? "↘ " : item.deltaBodyWeight > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyWeight, " kg")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : `${item.deltaWaist < 0 ? "↘ " : item.deltaWaist > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaWaist, " cm")}`}</span>
+        <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : `${item.deltaBodyFat < 0 ? "↘ " : item.deltaBodyFat > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyFat, " %")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">${trendLabel(item.deltaWaist)}</span>
+        <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
+        <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
+        <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost small" data-action="edit-measurement" data-id="${item.id}">Editar</button>
+        <button class="ghost small" data-action="delete-measurement" data-id="${item.id}">Borrar</button>
+      </div>
+    </article>
+  `).join("") : emptyHtml("Todavía no hay mediciones.");
 }
