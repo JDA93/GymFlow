@@ -287,7 +287,7 @@ export function migrateState(rawState) {
         name: String(exercise.name || "").trim(),
         sets: Number(exercise.sets || 0),
         reps: String(exercise.reps || "").trim(),
-        rest: Number(exercise.rest || base.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+        rest: Number(exercise.rest ?? base.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS),
         block: String(exercise.block || "").trim(),
         notes: String(exercise.notes || "").trim(),
         createdAt: exercise.createdAt || new Date().toISOString()

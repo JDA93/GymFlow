@@ -3,12 +3,17 @@ import { isStandaloneMode } from "./utils.js";
 export function createPwaManager(els, onStatusChange = () => {}) {
   let deferredPrompt = null;
   let registration = null;
+  let shouldReloadAfterUpdate = false;
+  let didReloadAfterUpdate = false;
 
   async function init() {
     if ("serviceWorker" in navigator) {
       try {
-        registration = await navigator.serviceWorker.register("./sw.js");
-        if (registration.waiting) els.updateBanner.hidden = false;
+        registration = await navigator.serviceWorker.register("./sw.js", { updateViaCache: "none" });
+        if (registration.waiting) {
+          els.updateBanner.hidden = false;
+          onStatusChange(getStatus());
+        }
 
         registration.addEventListener("updatefound", () => {
           const worker = registration.installing;
@@ -20,12 +25,22 @@ export function createPwaManager(els, onStatusChange = () => {}) {
             }
           });
         });
+
+        navigator.serviceWorker.ready.then((readyRegistration) => {
+          if (!registration) registration = readyRegistration;
+          onStatusChange(getStatus());
+        }).catch(() => {});
       } catch (error) {
         console.error("No se pudo registrar el service worker", error);
       }
 
       navigator.serviceWorker.addEventListener("controllerchange", () => {
-        window.location.reload();
+        if (shouldReloadAfterUpdate && !didReloadAfterUpdate) {
+          didReloadAfterUpdate = true;
+          window.location.reload();
+          return;
+        }
+        onStatusChange(getStatus());
       });
     }
 
@@ -61,6 +76,7 @@ export function createPwaManager(els, onStatusChange = () => {}) {
   async function refreshApp() {
     const current = registration || await navigator.serviceWorker.getRegistration();
     if (current?.waiting) {
+      shouldReloadAfterUpdate = true;
       current.waiting.postMessage({ type: "SKIP_WAITING" });
     } else {
       window.location.reload();
