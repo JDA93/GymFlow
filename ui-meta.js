@@ -1,205 +1,123 @@
-import {
-  BODY_METRIC_LABELS,
-  buildBodyChartPoints,
-  buildExerciseChartPoints,
-  buildRecentActivity,
-  buildTrendItems,
-  computeStats,
-  detectPotentialStall,
-  getSuggestedRoutine
-} from "./analytics.js";
-import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
-import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
+import { escapeHtml, formatNumber } from "./utils.js";
 
-export function renderStats(state, els) {
-  const stats = computeStats(state);
-  els.statSessionsMonth.textContent = stats.daysTrainedThisMonth;
-  els.statStreak.textContent = String(stats.continuityActive);
-  els.statWeight.textContent = stats.latestMeasurement?.bodyWeight !== "" && stats.latestMeasurement?.bodyWeight != null ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
-  els.statBestLift.textContent = stats.bestLift ? `${formatNumber(stats.bestLift.weight)} kg` : "—";
-  els.statBestLiftLabel.textContent = stats.bestLift ? stats.bestLift.exercise : "Sin datos";
-  els.statBestE1rm.textContent = stats.bestE1rm ? `${formatNumber(stats.bestE1rm.value)} kg` : "—";
-  els.statBestE1rmLabel.textContent = stats.bestE1rm ? stats.bestE1rm.item.exercise : "Estimado";
+export function emptyHtml(message) {
+  return `<div class="empty-box"><p class="empty">${escapeHtml(message)}</p></div>`;
 }
 
-export function renderDashboard(state, els, exerciseOptions) {
-  renderPrimaryAction(state, els);
-  renderQuickSignals(state, els);
-  renderLauncher(state, els);
-  renderRecentStory(state, els);
-  renderExerciseSelect(state, els, exerciseOptions);
-  renderExerciseChart(state, els);
-  renderBodyChart(state, els);
-}
-
-function buildTodayInsight(state, suggestion) {
-  const routine = suggestion?.routine;
-  if (routine && suggestion?.daysSince != null && suggestion.daysSince >= 4) {
-    return `Llevas ${suggestion.daysSince} días sin entrenar ${routine.name}.`;
-  }
-  const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
-  if (weeklyTarget > 0) {
-    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
-      .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
-  }
-  return "Prioriza la siguiente acción y ejecuta sin fricción.";
-}
-
-function renderPrimaryAction(state, els) {
-  const suggestion = getSuggestedRoutine(state);
-  const active = state.session.active;
-  if (active) {
-    const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
-    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
-    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
-    const nextExercise = routine?.exercises?.find((exercise) => !state.session.completedExerciseIds.includes(exercise.id) && !(state.session.skippedExerciseIds || []).includes(exercise.id)) || routine?.exercises?.[0] || null;
-    els.dashboardPrimaryCard.innerHTML = `
-      <div class="hero-copy">
-        <span class="pill">Sesión activa</span>
-        <h2>Continúa ${routine?.name || "tu entrenamiento"}</h2>
-        <p class="today-insight">${nextExercise ? `Toca seguir con ${nextExercise.name}.` : buildTodayInsight(state, suggestion)}</p>
-        <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
+export function cardHtml({ title = "", subtitle = "", chips = [], extraClass = "", body = "", footer = "" }) {
+  return `
+    <article class="list-item ${extraClass}">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${escapeHtml(title)}</h3>
+          ${subtitle ? `<p class="list-subtitle">${escapeHtml(subtitle)}</p>` : ""}
+        </div>
       </div>
-      <div class="hero-actions hero-actions--stack-mobile">
-        <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
-        <button class="ghost" data-action="open-tab" data-id="routines">Elegir otra rutina</button>
-      </div>
+      ${chips?.length ? `<div class="chip-row">${chips.map((chip) => `<span class="chip ${chip.type || "ghost"}">${escapeHtml(chip.label)}</span>`).join("")}</div>` : ""}
+      ${body ? `<div class="card-body-inline">${body}</div>` : ""}
+      ${footer ? `<div class="card-footer-inline">${footer}</div>` : ""}
+    </article>
+  `;
+}
+
+const MORE_TABS = new Set(["routines", "measurements", "analytics", "goals", "settings"]);
+
+export function setActiveTab(state, tabId) {
+  const resolvedTab = MORE_TABS.has(tabId) ? tabId : (tabId || "dashboard");
+  state.ui.activeTab = resolvedTab;
+  const primaryTab = MORE_TABS.has(resolvedTab) ? "more" : resolvedTab;
+
+  document.querySelectorAll(".tab").forEach((tab) => {
+    const active = tab.dataset.tab === primaryTab;
+    tab.classList.toggle("active", active);
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+    tab.tabIndex = active ? 0 : -1;
+  });
+
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    const active = panel.id === resolvedTab;
+    panel.classList.toggle("active", active);
+    panel.hidden = !active;
+  });
+}
+
+let toastTimer = null;
+export function toast(elsOrRegion, message, options = {}) {
+  const region = elsOrRegion.toastRegion || elsOrRegion;
+  if (!region) return;
+  clearTimeout(toastTimer);
+  const toastEl = document.createElement("div");
+  toastEl.className = `toast ${options.type ? `toast--${options.type}` : ""}`;
+  toastEl.innerHTML = `<span>${escapeHtml(message)}</span>${options.actionLabel ? `<button type="button" class="toast-action">${escapeHtml(options.actionLabel)}</button>` : ""}`;
+  region.innerHTML = "";
+  region.appendChild(toastEl);
+  const actionButton = toastEl.querySelector(".toast-action");
+  if (actionButton && typeof options.onAction === "function") {
+    actionButton.addEventListener("click", () => {
+      options.onAction();
+      region.innerHTML = "";
+    }, { once: true });
+  }
+  toastTimer = window.setTimeout(() => {
+    if (region.contains(toastEl)) region.innerHTML = "";
+  }, options.duration ?? 4200);
+}
+
+export function buildLineChart(points, suffix = "", label = "") {
+  if (!points?.length) return emptyHtml("Sin datos para dibujar esta curva.");
+  const width = 640;
+  const height = 220;
+  const padding = 24;
+  const values = points.map((point) => Number(point.value || 0));
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const getX = (index) => padding + (index * ((width - padding * 2) / Math.max(points.length - 1, 1)));
+  const getY = (value) => height - padding - (((value - min) / range) * (height - padding * 2));
+  const polyline = points.map((point, index) => `${getX(index)},${getY(point.value)}`).join(" ");
+  const dots = points.map((point, index) => `
+    <g>
+      <circle cx="${getX(index)}" cy="${getY(point.value)}" r="4"></circle>
+      <title>${escapeHtml(`${point.label}: ${formatNumber(point.value)}${suffix}`)}</title>
+    </g>
+  `).join("");
+  const yTicks = Array.from({ length: 4 }, (_, index) => {
+    const value = min + ((range / 3) * index);
+    const y = getY(value);
+    return `
+      <g>
+        <line x1="${padding}" x2="${width - padding}" y1="${y}" y2="${y}" class="chart-grid-line"></line>
+        <text x="${padding}" y="${y - 6}" class="chart-label chart-label--y">${escapeHtml(formatNumber(value))}${escapeHtml(suffix)}</text>
+      </g>
     `;
-    return;
-  }
-
-  if (!suggestion.routine) {
-    els.dashboardPrimaryCard.innerHTML = `
-      <div class="hero-copy">
-        <span class="pill">Primer paso</span>
-        <h2>Prepara tu primera rutina</h2>
-        <p>GymFlow Pro está lista para entrenar. Crea una rutina o carga demo para empezar en menos de un minuto.</p>
-      </div>
-      <div class="hero-actions hero-actions--stack-mobile">
-        <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>
-        <button class="ghost" data-action="load-demo">Cargar demo</button>
-      </div>
-    `;
-    return;
-  }
-
-  const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
-  els.dashboardPrimaryCard.innerHTML = `
-    <div class="hero-copy">
-      <span class="pill">Recomendación</span>
-      <h2>Entrena ${suggestion.routine.name} ahora</h2>
-      <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
-      <p>${suggestion.reason} ${lastLabel}.</p>
-    </div>
-    <div class="hero-actions hero-actions--stack-mobile">
-      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
-      <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
+  }).join("");
+  const xLabels = points.map((point, index) => `<text x="${getX(index)}" y="${height - 4}" text-anchor="middle" class="chart-label">${escapeHtml(point.label)}</text>`).join("");
+  return `
+    <div class="chart-wrapper">
+      <p class="chart-caption">${escapeHtml(label)}</p>
+      <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeHtml(label)}">
+        ${yTicks}
+        <polyline points="${polyline}" fill="none" class="chart-line"></polyline>
+        ${dots}
+        ${xLabels}
+      </svg>
     </div>
   `;
 }
 
-function renderLauncher(state, els) {
-  const suggestion = getSuggestedRoutine(state);
-  const cards = [];
-  if (state.session.active) {
-    const routine = state.routines.find((item) => item.id === state.session.routineId);
-    cards.push(cardHtml({
-      title: "Continuar sesión",
-      subtitle: routine ? `Rutina activa: ${routine.name}.` : "Retoma exactamente donde te quedaste.",
-      chips: [{ label: "Prioridad alta", type: "success" }],
-      footer: `<button data-action="continue-session">Abrir sesión</button>`
-    }));
-  } else if (suggestion.routine) {
-    cards.push(cardHtml({
-      title: `Arrancar ${suggestion.routine.name}`,
-      subtitle: suggestion.reason,
-      chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
-      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
-    }));
-  }
-
-  cards.push(cardHtml({
-    title: "Check-in corporal",
-    subtitle: "Registra peso, cintura o sueño para mantener contexto.",
-    chips: [{ label: "30 segundos", type: "ghost" }],
-    footer: `<button class="ghost small" data-action="open-tab" data-id="measurements">Log medida</button>`
-  }));
-
-  els.recommendedRoutine.innerHTML = cards.join("");
-}
-
-function renderQuickSignals(state, els) {
-  const trendItems = buildTrendItems(state);
-  const stalledExercise = detectPotentialStall(state)[0] || null;
-  const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
-  if (stalledExercise) {
-    cards.push(cardHtml({
-      title: `Posible estancamiento`,
-      subtitle: `${stalledExercise.exercise} lleva varias referencias planas.`,
-      chips: [
-        { label: `e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
-        { label: formatDate(stalledExercise.date), type: "ghost" }
-      ]
-    }));
-  }
-  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
-}
-
-function renderRecentStory(state, els) {
-  const cards = buildRecentActivity(state, 6).map((item) => cardHtml({
-    title: item.title,
-    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : `Registro manual · ${item.subtitle}`}`,
-    chips: item.kind === "session"
-      ? [
-        { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
-        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" },
-        ...(item.notes ? [{ label: "Incluye notas", type: "warning" }] : [])
-      ]
-      : [
-        { label: item.routineName || "Registro manual", type: "ghost" },
-        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
-        ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
-      ],
-    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
-  }));
-  els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
-}
-
-function renderExerciseSelect(state, els, exerciseOptions) {
-  if (!exerciseOptions.length) {
-    els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
-    state.ui.dashboardExerciseId = "";
-    return;
-  }
-
-  if (!state.ui.dashboardExerciseId || !exerciseOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
-    state.ui.dashboardExerciseId = exerciseOptions[0].id;
-  }
-
-  els.dashboardExerciseSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
-  els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
-  els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
-  els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
-  if (els.chartAggregationSelect) els.chartAggregationSelect.value = state.ui.chartAggregation || "day";
-}
-
-function renderExerciseChart(state, els) {
-  const metric = state.ui.dashboardExerciseMetric || "e1rm";
-  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
-  const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
-  const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
-  els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
-}
-
-function renderBodyChart(state, els) {
-  const metric = state.ui.dashboardMetric || "bodyWeight";
-  const points = buildBodyChartPoints(state, metric);
-  const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? " h" : metric === "bodyWeight" ? " kg" : " cm";
-  const label = BODY_METRIC_LABELS[metric] || "Métrica corporal";
-  const latest = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  els.bodyChart.innerHTML = points.length >= 2
-    ? `${latest ? `<div class="mini-insight">Última lectura: ${latest[metric] !== "" && latest[metric] != null ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
-    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
+export function buildBarChart(points, suffix = "", label = "") {
+  if (!points?.length) return emptyHtml("Sin datos para dibujar esta barra.");
+  const max = Math.max(...points.map((point) => Number(point.value || 0)), 1);
+  return `
+    <div class="bars-chart" aria-label="${escapeHtml(label)}">
+      <p class="chart-caption">${escapeHtml(label)}</p>
+      ${points.map((point) => `
+        <div class="bars-row">
+          <span class="bars-label">${escapeHtml(point.label)}</span>
+          <div class="bars-track"><span style="width:${(Number(point.value || 0) / max) * 100}%"></span></div>
+          <strong>${escapeHtml(formatNumber(point.value))}${escapeHtml(suffix)}</strong>
+        </div>
+      `).join("")}
+    </div>
+  `;
 }

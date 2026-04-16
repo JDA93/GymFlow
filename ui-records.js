@@ -2,365 +2,204 @@ import {
   BODY_METRIC_LABELS,
   buildBodyChartPoints,
   buildExerciseChartPoints,
-  buildMonthlyVolumeSeries,
-  buildMuscleDistribution,
+  buildRecentActivity,
   buildTrendItems,
-  buildWeeklyFrequencySeries,
-  buildWeeklyVolumeSeries,
-  computeAdherence,
-  computeBestLiftMap,
-  computeFirstLiftMap,
-  computeGoalProgress,
-  detectPotentialStall
+  computeStats,
+  detectPotentialStall,
+  getSuggestedRoutine
 } from "./analytics.js";
-import { buildBarChart, buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
-import { formatDate, formatNumber, percentage, daysBetween, todayLocal } from "./utils.js";
+import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
+import { formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
-export function renderAnalytics(state, els, exerciseOptions) {
-  renderAnalyticsHighlights(state, els);
-  renderAnalyticsCharts(state, els, exerciseOptions);
-  renderAnalyticsDeep(state, els);
+export function renderStats(state, els) {
+  const stats = computeStats(state);
+  els.statSessionsMonth.textContent = stats.daysTrainedThisMonth;
+  els.statStreak.textContent = String(stats.continuityActive);
+  els.statWeight.textContent = stats.latestMeasurement?.bodyWeight !== "" && stats.latestMeasurement?.bodyWeight != null ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
+  els.statBestLift.textContent = stats.bestLift ? `${formatNumber(stats.bestLift.weight)} kg` : "—";
+  els.statBestLiftLabel.textContent = stats.bestLift ? stats.bestLift.exercise : "Sin datos";
+  els.statBestE1rm.textContent = stats.bestE1rm ? `${formatNumber(stats.bestE1rm.value)} kg` : "—";
+  els.statBestE1rmLabel.textContent = stats.bestE1rm ? stats.bestE1rm.item.exercise : "Estimado";
 }
 
-function renderAnalyticsHighlights(state, els) {
-  const items = buildTrendItems(state);
-  const adherence = computeAdherence(state);
-  const weekSeries = buildWeeklyVolumeSeries(state);
-  const latestWeek = weekSeries[weekSeries.length - 1];
-  const previousWeek = weekSeries[weekSeries.length - 2];
-  const volumeDelta = latestWeek && previousWeek ? latestWeek.value - previousWeek.value : null;
-  const summary = cardHtml({
-    title: "Qué cambió esta semana",
-    subtitle: adherence.workoutsPerWeek.target != null
-      ? `Esta semana llevas ${adherence.workoutsPerWeek.current}/${adherence.workoutsPerWeek.target} sesiones frente a tu objetivo.`
-      : "Define objetivos de hábito para tener una lectura de ritmo semanal.",
-    chips: [
-      { label: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Ritmo sólido" : "Ritmo mejorable", type: adherence.workoutsPerWeek.target != null && adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" },
-      ...(volumeDelta == null ? [] : [{ label: `${volumeDelta >= 0 ? "+" : ""}${formatNumber(volumeDelta)} kg vs semana previa`, type: volumeDelta >= 0 ? "success" : "warning" }])
-    ]
-  });
-  const keyItems = items.slice(0, 2).map((item) => cardHtml(item));
-  els.analyticsHighlights.innerHTML = [summary, ...keyItems].join("");
+export function renderDashboard(state, els, exerciseOptions) {
+  renderPrimaryAction(state, els);
+  renderQuickSignals(state, els);
+  renderLauncher(state, els);
+  renderRecentStory(state, els);
+  renderExerciseSelect(state, els, exerciseOptions);
+  renderExerciseChart(state, els);
+  renderBodyChart(state, els);
 }
 
-function renderAnalyticsCharts(state, els, exerciseOptions) {
-  if (!exerciseOptions.length) {
-    els.analyticsLiftSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
-    state.ui.analyticsLiftId = "";
-    els.analyticsLiftChart.innerHTML = emptyHtml("Sin ejercicios para analizar.");
-  } else {
-    if (!state.ui.analyticsLiftId || !exerciseOptions.some((item) => item.id === state.ui.analyticsLiftId)) {
-      state.ui.analyticsLiftId = exerciseOptions[0].id;
-    }
-    els.analyticsLiftSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
-    els.analyticsLiftSelect.value = state.ui.analyticsLiftId;
-    const liftPoints = buildExerciseChartPoints(state, state.ui.analyticsLiftId, "e1rm", state.ui.chartAggregation || "day");
-    els.analyticsLiftChart.innerHTML = liftPoints.length >= 2 ? buildLineChart(liftPoints, " kg", "Evolución de e1RM") : emptyHtml("Necesitas al menos dos referencias del ejercicio.");
+function buildTodayInsight(state, suggestion) {
+  const routine = suggestion?.routine;
+  if (routine && suggestion?.daysSince != null && suggestion.daysSince >= 4) {
+    return `Llevas ${suggestion.daysSince} días sin entrenar ${routine.name}.`;
   }
-
-  const weeklyVolume = buildWeeklyVolumeSeries(state);
-  const weeklyFrequency = buildWeeklyFrequencySeries(state);
-  const monthlyVolume = buildMonthlyVolumeSeries(state);
-
-  els.analyticsFrequencyChart.innerHTML = weeklyFrequency.length ? buildBarChart(weeklyFrequency, " días", "Frecuencia semanal") : emptyHtml("Sin semanas suficientes.");
-  els.analyticsVolumeChart.innerHTML = weeklyVolume.length ? buildBarChart(weeklyVolume, " kg", "Volumen semanal") : emptyHtml("Sin volumen suficiente.");
-  els.analyticsMonthlyChart.innerHTML = monthlyVolume.length ? buildBarChart(monthlyVolume, " kg", "Comparación mensual") : emptyHtml("Sin meses suficientes.");
+  const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
+  if (weeklyTarget > 0) {
+    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
+      .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
+    if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
+  }
+  return "Prioriza la siguiente acción y ejecuta sin fricción.";
 }
 
-function renderAnalyticsDeep(state, els) {
-  const stalls = detectPotentialStall(state).slice(0, 4);
-  const muscleDistribution = buildMuscleDistribution(state, 30).slice(0, 6);
-  const adherence = computeAdherence(state);
-
-  els.analyticsStalls.innerHTML = stalls.length
-    ? stalls.map((item) => cardHtml({
-      title: item.exercise,
-      subtitle: `Pendiente plana en 5 referencias recientes.`,
-      chips: [
-        { label: `e1RM ${formatNumber(item.latest)} kg`, type: "warning" },
-        { label: formatDate(item.date), type: "ghost" }
-      ]
-    })).join("")
-    : emptyHtml("No se detectan ejercicios claramente estancados.");
-
-  els.analyticsMuscles.innerHTML = muscleDistribution.length
-    ? buildBarChart(muscleDistribution.map((item) => ({ label: item.label, value: item.value })), " kg", "Distribución por grupo muscular (30 días)")
-    : emptyHtml("Entrena más sesiones para ver patrones musculares.");
-
-  const habitCards = [];
-  if (adherence.workoutsPerWeek.target != null) {
-    habitCards.push(cardHtml({
-      title: "Objetivo semanal de entrenos",
-      subtitle: `${adherence.workoutsPerWeek.current}/${adherence.workoutsPerWeek.target} sesiones esta semana.`,
-      chips: [{ label: adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "Vas en ritmo" : "Debajo de ritmo", type: adherence.workoutsPerWeek.current >= adherence.workoutsPerWeek.target ? "success" : "warning" }]
-    }));
-  }
-  if (adherence.sleepHours.target != null) {
-    habitCards.push(cardHtml({
-      title: "Sueño",
-      subtitle: adherence.sleepHours.current == null ? "Sin dato actual de sueño." : `Último dato ${formatNumber(adherence.sleepHours.current)} h.`,
-      chips: [{ label: adherence.sleepHours.current != null && adherence.sleepHours.current >= adherence.sleepHours.target ? "Vas en ritmo" : "No vas en ritmo", type: adherence.sleepHours.current != null && adherence.sleepHours.current >= adherence.sleepHours.target ? "success" : "warning" }]
-    }));
-  }
-  if (adherence.measureEveryDays.target != null) {
-    habitCards.push(cardHtml({
-      title: "Frecuencia de medidas",
-      subtitle: adherence.measureEveryDays.current == null ? "Aún sin mediciones." : `Han pasado ${adherence.measureEveryDays.current} días desde la última medición.`,
-      chips: [{ label: adherence.measureEveryDays.current != null && adherence.measureEveryDays.current <= adherence.measureEveryDays.target ? "Vas en ritmo" : "No vas en ritmo", type: adherence.measureEveryDays.current != null && adherence.measureEveryDays.current <= adherence.measureEveryDays.target ? "success" : "warning" }]
-    }));
-  }
-  if (adherence.minimumStreakDays.target != null) {
-    habitCards.push(cardHtml({
-      title: "Continuidad",
-      subtitle: `Tu continuidad activa es de ${adherence.minimumStreakDays.current} días entrenados.`,
-      chips: [{ label: adherence.minimumStreakDays.current >= adherence.minimumStreakDays.target ? "Vas en ritmo" : "No vas en ritmo", type: adherence.minimumStreakDays.current >= adherence.minimumStreakDays.target ? "success" : "warning" }]
-    }));
-  }
-
-  els.analyticsHabits.innerHTML = habitCards.length ? habitCards.join("") : emptyHtml("Define hábitos en Objetivos para medir adherencia aquí.");
-}
-
-export function renderGoalSummary(state, els) {
-  const goals = state.goals;
-  const latestMeasurement = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  const oldestMeasurement = [...state.measurements].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
-  const bestMap = computeBestLiftMap(state);
-  const firstLiftMap = computeFirstLiftMap(state);
-  const cards = [];
-
-  if (goals.focusGoal) {
-    const dateStatus = goals.goalDate ? buildGoalDateStatus(goals.goalDate) : null;
-    cards.push(cardHtml({
-      title: "Meta principal del bloque",
-      subtitle: goals.focusGoal,
-      chips: [
-        { label: goals.athleteName || "Atleta", type: "ghost" },
-        ...(goals.goalDate ? [{ label: `Fecha objetivo ${goals.goalDate}`, type: "ghost" }] : []),
-        ...(dateStatus ? [{ label: dateStatus, type: daysBetween(todayLocal(), goals.goalDate) >= 0 ? "success" : "warning" }] : [])
-      ],
-      extraClass: "highlight"
-    }));
-  }
-
-  const resultGoals = [
-    {
-      key: "bodyWeight",
-      label: "Peso",
-      current: latestMeasurement?.bodyWeight,
-      baseline: oldestMeasurement?.bodyWeight,
-      baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.bodyWeight,
-      suffix: "kg"
-    },
-    {
-      key: "waist",
-      label: "Cintura",
-      current: latestMeasurement?.waist,
-      baseline: oldestMeasurement?.waist,
-      baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.waist,
-      suffix: "cm"
-    },
-    {
-      key: "bodyFat",
-      label: "Grasa corporal",
-      current: latestMeasurement?.bodyFat,
-      baseline: oldestMeasurement?.bodyFat,
-      baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.bodyFat,
-      suffix: "%"
-    },
-    {
-      key: "bench",
-      label: "Press banca",
-      current: bestMap["bench-press"]?.value,
-      baseline: firstLiftMap["bench-press"]?.value,
-      baselineDate: firstLiftMap["bench-press"]?.date || "",
-      target: goals.resultGoals.bench,
-      suffix: "kg"
-    },
-    {
-      key: "squat",
-      label: "Sentadilla",
-      current: bestMap["squat"]?.value,
-      baseline: firstLiftMap["squat"]?.value,
-      baselineDate: firstLiftMap["squat"]?.date || "",
-      target: goals.resultGoals.squat,
-      suffix: "kg"
-    },
-    {
-      key: "deadlift",
-      label: "Peso muerto",
-      current: bestMap["deadlift"]?.value || bestMap["romanian-deadlift"]?.value,
-      baseline: firstLiftMap["deadlift"]?.value || firstLiftMap["romanian-deadlift"]?.value,
-      baselineDate: firstLiftMap["deadlift"]?.date || firstLiftMap["romanian-deadlift"]?.date || "",
-      target: goals.resultGoals.deadlift,
-      suffix: "kg"
-    }
-  ];
-
-  resultGoals.filter((goal) => goal.target !== "" && goal.target != null).forEach((goal) => cards.push(goalCard(goal, goals.goalDate)));
-
-  const habitCards = buildHabitGoalCards(goals.habits, latestMeasurement, state);
-  cards.push(...habitCards);
-
-  if (!cards.length) {
-    els.goalSummary.innerHTML = emptyHtml("Todavía no has definido objetivos.");
+function renderPrimaryAction(state, els) {
+  const suggestion = getSuggestedRoutine(state);
+  const active = state.session.active;
+  if (active) {
+    const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
+    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
+    const routine = state.routines.find((item) => item.id === state.session.routineId);
+    const nextExercise = routine?.exercises?.find((exercise) => !state.session.completedExerciseIds.includes(exercise.id) && !(state.session.skippedExerciseIds || []).includes(exercise.id)) || routine?.exercises?.[0] || null;
+    els.dashboardPrimaryCard.innerHTML = `
+      <div class="hero-copy">
+        <span class="pill">Sesión activa</span>
+        <h2>Continúa ${routine?.name || "tu entrenamiento"}</h2>
+        <p class="today-insight">${nextExercise ? `Toca seguir con ${nextExercise.name}.` : buildTodayInsight(state, suggestion)}</p>
+        <p>${workingSets} series efectivas · ${warmupSets} warm-up · ${formatNumber(volume)} kg acumulados.</p>
+      </div>
+      <div class="hero-actions hero-actions--stack-mobile">
+        <button id="dashboardPrimaryCta" data-action="continue-session">Continuar sesión</button>
+        <button class="ghost" data-action="open-tab" data-id="routines">Elegir otra rutina</button>
+      </div>
+    `;
     return;
   }
-  els.goalSummary.innerHTML = cards.join("");
-}
 
-function buildGoalDateStatus(goalDate) {
-  const remaining = daysBetween(todayLocal(), goalDate);
-  if (remaining > 0) return `Quedan ${remaining} días`;
-  if (remaining === 0) return "Fecha objetivo hoy";
-  return `Fecha superada hace ${Math.abs(remaining)} días`;
-}
-
-function goalCard({ label, current, target, baseline, baselineDate, suffix }, goalDate) {
-  const currentValue = current === "" || current == null ? null : Number(current);
-  const targetValue = target === "" || target == null ? null : Number(target);
-  const baselineValue = baseline === "" || baseline == null ? null : Number(baseline);
-  const progress = computeGoalProgress({ baseline: baselineValue, current: currentValue, target: targetValue });
-  const delta = currentValue == null || targetValue == null ? null : targetValue - currentValue;
-  const paceLabel = buildPaceLabel({ baseline: baselineValue, baselineDate, current: currentValue, target: targetValue, goalDate });
-
-  return `
-    <article class="list-item">
-      <div class="list-head">
-        <div>
-          <h3 class="list-title">${label}</h3>
-          <p class="list-subtitle">${currentValue == null ? `Objetivo ${formatNumber(targetValue)} ${suffix}. Aún no hay valor actual.` : `Actual ${formatNumber(currentValue)} ${suffix} · Objetivo ${formatNumber(targetValue)} ${suffix}`}</p>
-        </div>
-        <span class="chip ${progress >= 100 ? "success" : progress >= 70 ? "warning" : "ghost"}">${formatNumber(progress)}%</span>
+  if (!suggestion.routine) {
+    els.dashboardPrimaryCard.innerHTML = `
+      <div class="hero-copy">
+        <span class="pill">Primer paso</span>
+        <h2>Prepara tu primera rutina</h2>
+        <p>GymFlow Pro está lista para entrenar. Crea una rutina o carga demo para empezar en menos de un minuto.</p>
       </div>
-      <div class="goal-progress">
-        <div class="goal-progress-bar"><span style="width:${Math.min(progress, 100)}%"></span></div>
-        <div class="goal-progress-meta">
-          <span>${baselineValue == null ? "Sin referencia inicial" : `Inicio ${formatNumber(baselineValue)} ${suffix}`}</span>
-          <span>${delta == null ? "Sin valor actual" : `${delta > 0 ? "Te faltan" : "Ya superado por"} ${formatNumber(Math.abs(delta))} ${suffix}`}</span>
-        </div>
+      <div class="hero-actions hero-actions--stack-mobile">
+        <button id="dashboardPrimaryCta" data-action="open-tab" data-id="routines">Crear rutina</button>
+        <button class="ghost" data-action="load-demo">Cargar demo</button>
       </div>
-      ${paceLabel ? `<div class="chip-row"><span class="chip ${paceLabel.includes("Vas") ? "success" : "warning"}">${paceLabel}</span></div>` : ""}
-    </article>
+    `;
+    return;
+  }
+
+  const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
+  els.dashboardPrimaryCard.innerHTML = `
+    <div class="hero-copy">
+      <span class="pill">Recomendación</span>
+      <h2>Entrena ${suggestion.routine.name} ahora</h2>
+      <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
+      <p>${suggestion.reason} ${lastLabel}.</p>
+    </div>
+    <div class="hero-actions hero-actions--stack-mobile">
+      <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${suggestion.routine.id}">Empezar rutina recomendada</button>
+      <button class="ghost" data-action="open-tab" data-id="routines">Ver biblioteca</button>
+    </div>
   `;
 }
 
-function buildPaceLabel({ baseline, baselineDate, current, target, goalDate }) {
-  if (!goalDate || current == null || target == null) return "";
-  const remaining = daysBetween(todayLocal(), goalDate);
-  if (remaining < 0) return current === target ? "Objetivo cumplido" : "Fecha objetivo superada";
-  if (baseline == null) return "Falta línea base para calcular ritmo";
-  const totalDistance = Math.abs(target - baseline);
-  if (!totalDistance) return "Objetivo cumplido";
-  const currentDistance = Math.abs(current - baseline);
-  if (!baselineDate) return "Define más histórico para calcular ritmo";
-  const elapsedDays = Math.max(1, daysBetween(baselineDate, todayLocal()));
-  const velocity = currentDistance / elapsedDays;
-  const requiredVelocity = Math.abs(target - current) / Math.max(1, remaining);
-  if (!Number.isFinite(velocity) || velocity <= 0) return "Ritmo incierto: aún faltan más datos";
-  const ratio = velocity / Math.max(requiredVelocity, 0.0001);
-  if (ratio >= 1.15) return "Vas por delante del ritmo";
-  if (ratio >= 0.9) return "Vas en ritmo";
-  return "Vas por debajo del ritmo";
-}
-
-function buildHabitGoalCards(habits, latestMeasurement, state) {
+function renderLauncher(state, els) {
+  const suggestion = getSuggestedRoutine(state);
   const cards = [];
-  const workoutCurrent = [...state.workouts.filter((item) => !item.isWarmup).reduce((acc, item) => { acc.add(item.date); return acc; }, new Set())].filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-  if (habits.workoutsPerWeek !== "" && habits.workoutsPerWeek != null) {
-    const target = Number(habits.workoutsPerWeek);
+  if (state.session.active) {
+    const routine = state.routines.find((item) => item.id === state.session.routineId);
     cards.push(cardHtml({
-      title: "Hábito: entrenar por semana",
-      subtitle: `${workoutCurrent}/${target} sesiones esta semana.`,
-      chips: [{ label: workoutCurrent >= target ? "Vas en ritmo" : "No vas en ritmo", type: workoutCurrent >= target ? "success" : "warning" }]
+      title: "Continuar sesión",
+      subtitle: routine ? `Rutina activa: ${routine.name}.` : "Retoma exactamente donde te quedaste.",
+      chips: [{ label: "Prioridad alta", type: "success" }],
+      footer: `<button data-action="continue-session">Abrir sesión</button>`
+    }));
+  } else if (suggestion.routine) {
+    cards.push(cardHtml({
+      title: `Arrancar ${suggestion.routine.name}`,
+      subtitle: suggestion.reason,
+      chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
+      footer: `<button data-action="start-routine" data-id="${suggestion.routine.id}">Empezar</button>`
     }));
   }
-  if (habits.sleepHours !== "" && habits.sleepHours != null) {
-    const current = latestMeasurement?.sleepHours === "" || latestMeasurement?.sleepHours == null ? null : Number(latestMeasurement.sleepHours);
-    const target = Number(habits.sleepHours);
+
+  cards.push(cardHtml({
+    title: "Check-in corporal",
+    subtitle: "Registra peso, cintura o sueño para mantener contexto.",
+    chips: [{ label: "30 segundos", type: "ghost" }],
+    footer: `<button class="ghost small" data-action="open-tab" data-id="measurements">Log medida</button>`
+  }));
+
+  els.recommendedRoutine.innerHTML = cards.join("");
+}
+
+function renderQuickSignals(state, els) {
+  const trendItems = buildTrendItems(state);
+  const stalledExercise = detectPotentialStall(state)[0] || null;
+  const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
+  if (stalledExercise) {
     cards.push(cardHtml({
-      title: "Hábito: sueño",
-      subtitle: current == null ? `Objetivo ${target} h. Sin dato actual.` : `Último dato ${formatNumber(current)} h · objetivo ${target} h.`,
-      chips: [{ label: current != null && current >= target ? "Vas en ritmo" : "No vas en ritmo", type: current != null && current >= target ? "success" : "warning" }]
+      title: `Posible estancamiento`,
+      subtitle: `${stalledExercise.exercise} lleva varias referencias planas.`,
+      chips: [
+        { label: `e1RM ${formatNumber(stalledExercise.latest)} kg`, type: "warning" },
+        { label: formatDate(stalledExercise.date), type: "ghost" }
+      ]
     }));
   }
-  if (habits.measureEveryDays !== "" && habits.measureEveryDays != null) {
-    const lastMeasurementDate = latestMeasurement?.date || null;
-    const gap = lastMeasurementDate ? daysBetween(lastMeasurementDate, todayLocal()) : null;
-    const target = Number(habits.measureEveryDays);
-    cards.push(cardHtml({
-      title: "Hábito: medir progreso",
-      subtitle: gap == null ? `Objetivo cada ${target} días. Aún no hay mediciones.` : `Han pasado ${gap} días desde la última medición.`,
-      chips: [{ label: gap != null && gap <= target ? "Vas en ritmo" : "No vas en ritmo", type: gap != null && gap <= target ? "success" : "warning" }]
-    }));
+  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
+}
+
+function renderRecentStory(state, els) {
+  const cards = buildRecentActivity(state, 6).map((item) => cardHtml({
+    title: item.title,
+    subtitle: `${formatDate(item.date)} · ${item.kind === "session" ? `Sesión completa · ${item.subtitle}` : `Registro manual · ${item.subtitle}`}`,
+    chips: item.kind === "session"
+      ? [
+        { label: `Duración ${formatDuration(item.durationSeconds || 0)}`, type: "ghost" },
+        { label: `Volumen ${formatNumber(item.volume || 0)} kg`, type: "success" },
+        ...(item.notes ? [{ label: "Incluye notas", type: "warning" }] : [])
+      ]
+      : [
+        { label: item.routineName || "Registro manual", type: "ghost" },
+        { label: `e1RM ${formatNumber(item.bestE1rm || 0)} kg`, type: "warning" },
+        ...(item.notes ? [{ label: "Con nota", type: "ghost" }] : [])
+      ],
+    footer: item.notes ? `<p class="helper-line">📝 ${item.notes}</p>` : ""
+  }));
+  els.recentStory.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay actividad reciente.");
+}
+
+function renderExerciseSelect(state, els, exerciseOptions) {
+  if (!exerciseOptions.length) {
+    els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
+    state.ui.dashboardExerciseId = "";
+    return;
   }
-  return cards;
+
+  if (!state.ui.dashboardExerciseId || !exerciseOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
+    state.ui.dashboardExerciseId = exerciseOptions[0].id;
+  }
+
+  els.dashboardExerciseSelect.innerHTML = exerciseOptions.map((item) => `<option value="${item.id}">${item.name}</option>`).join("");
+  els.dashboardExerciseSelect.value = state.ui.dashboardExerciseId;
+  els.dashboardExerciseMetricSelect.value = state.ui.dashboardExerciseMetric || "e1rm";
+  els.dashboardMetricSelect.value = state.ui.dashboardMetric || "bodyWeight";
+  if (els.chartAggregationSelect) els.chartAggregationSelect.value = state.ui.chartAggregation || "day";
 }
 
-export function renderGoalForm(state, els) {
-  const goals = state.goals;
-  if (els.goalForm.athleteName) els.goalForm.athleteName.value = goals.athleteName || "";
-  if (els.goalForm.focusGoal) els.goalForm.focusGoal.value = goals.focusGoal || "";
-  if (els.goalForm.goalDate) els.goalForm.goalDate.value = goals.goalDate || "";
-  Object.entries(goals.resultGoals || {}).forEach(([key, value]) => {
-    if (els.goalForm[key]) els.goalForm[key].value = value ?? "";
-  });
-  Object.entries(goals.habits || {}).forEach(([key, value]) => {
-    if (els.goalForm[key]) els.goalForm[key].value = value ?? "";
-  });
+function renderExerciseChart(state, els) {
+  const metric = state.ui.dashboardExerciseMetric || "e1rm";
+  const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
+  const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
+  const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
+  els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
 }
 
-export function renderPreferencesForm(state, els) {
-  Object.entries(state.preferences).forEach(([key, value]) => {
-    if (!els.preferencesForm[key]) return;
-    if (typeof value === "boolean") els.preferencesForm[key].checked = value;
-    else els.preferencesForm[key].value = value;
-  });
-}
-
-export function renderPwaStatus(els, pwaStatus, storageStatus) {
-  const items = [
-    {
-      title: "Compatibilidad de instalación",
-      subtitle: !pwaStatus.secureContext
-        ? "La instalación PWA requiere HTTPS o localhost."
-        : pwaStatus.standalone
-          ? "La app ya está instalada y ejecutándose en modo standalone."
-          : pwaStatus.ios
-            ? "En iPhone: Compartir > Añadir a pantalla de inicio."
-            : pwaStatus.installAvailable
-              ? "Este navegador ya habilitó la instalación desde el botón."
-              : "La instalación aún no está habilitada en esta sesión. Sigue siendo usable desde navegador.",
-      chips: [{ label: pwaStatus.standalone ? "Instalada" : pwaStatus.installAvailable ? "Lista" : "Pendiente", type: pwaStatus.standalone ? "success" : pwaStatus.installAvailable ? "warning" : "ghost" }]
-    },
-    {
-      title: "Actualizaciones",
-      subtitle: pwaStatus.updateReady
-        ? "Hay una nueva versión descargada y lista para aplicar con seguridad desde el botón superior."
-        : "No hay una actualización pendiente ahora mismo. Cuando exista, se mostrará un aviso claro.",
-      chips: [{ label: pwaStatus.updateReady ? "Lista para aplicar" : "Al día", type: pwaStatus.updateReady ? "warning" : "success" }]
-    },
-    {
-      title: "Manifest, iconos y service worker",
-      subtitle: !pwaStatus.manifestPresent
-        ? "Falta manifest o iconos; revisa para asegurar instalabilidad."
-        : !pwaStatus.swSupported
-          ? "Este navegador no soporta service worker."
-          : pwaStatus.registration
-            ? (pwaStatus.controlled ? "Manifest correcto y service worker controlando esta pestaña para uso offline." : "Manifest correcto. El service worker ya se registró, pero esta pestaña aún no está bajo control.")
-            : "Manifest correcto, pero aún no se detecta un service worker activo.",
-      chips: [{ label: !pwaStatus.manifestPresent ? "Revisar" : pwaStatus.controlled ? "Offline listo" : pwaStatus.registration ? "Casi listo" : "Pendiente", type: !pwaStatus.manifestPresent ? "danger" : pwaStatus.controlled ? "success" : "warning" }]
-    },
-    {
-      title: "Guardado local y backup",
-      subtitle: storageStatus.mode === "indexeddb"
-        ? "Guardado principal en IndexedDB con respaldo local automático."
-        : "Se usa respaldo local porque IndexedDB no está disponible en este entorno.",
-      chips: [{ label: storageStatus.mode === "indexeddb" ? "Persistencia robusta" : "Modo respaldo", type: storageStatus.mode === "indexeddb" ? "success" : "warning" }]
-    }
-  ];
-
-  els.pwaStatusBox.innerHTML = items.map((item) => cardHtml(item)).join("");
+function renderBodyChart(state, els) {
+  const metric = state.ui.dashboardMetric || "bodyWeight";
+  const points = buildBodyChartPoints(state, metric);
+  const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? " h" : metric === "bodyWeight" ? " kg" : " cm";
+  const label = BODY_METRIC_LABELS[metric] || "Métrica corporal";
+  const latest = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  els.bodyChart.innerHTML = points.length >= 2
+    ? `${latest ? `<div class="mini-insight">Última lectura: ${latest[metric] !== "" && latest[metric] != null ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
+    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
 }

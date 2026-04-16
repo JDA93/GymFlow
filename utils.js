@@ -1,215 +1,218 @@
-import { getExerciseReference, getActiveRoutine, nextLoadSuggestionForExercise } from "./analytics.js";
-import { emptyHtml } from "./ui-common.js";
-import { escapeHtml, extractMainRep, formatDuration, formatNumber, parseRepRange } from "./utils.js";
-import { getExerciseCompletionStatus, getSessionDurationSeconds, getSessionEntriesByExercise, getNextSuggestedExerciseId, isExerciseSkipped } from "./session.js";
+import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetadata } from "./analytics.js";
+import { cardHtml, emptyHtml } from "./ui-common.js";
+import { formatCompactDelta, formatDate, formatDuration, formatNumber, normalizeNameForMatch, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
-export function renderSession(state, els) {
-  const routine = getActiveRoutine(state);
-  const active = state.session.active && routine;
-  const durationSeconds = getSessionDurationSeconds(state);
-  const effectiveVolume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+export function renderRoutines(state, els) {
+  const search = normalizeNameForMatch(String(state.ui.routineSearch || ""));
+  const dayFilter = state.ui.routineDayFilter || "all";
+  const activeRoutineId = state.session.active ? state.session.routineId : "";
 
-  els.sessionStatusLabel.textContent = active ? routine.name : "Sin sesión";
-  els.sessionDurationLabel.textContent = formatDuration(durationSeconds);
-  els.sessionVolumeLabel.textContent = `${formatNumber(effectiveVolume)} kg`;
-  els.sessionNotes.value = state.session.notes || "";
-  els.copyLastSessionBtn.disabled = !active;
-  els.discardSessionBtn.disabled = !active;
-  els.endSessionBtn.disabled = !active;
-  els.startSessionBtn.textContent = active ? "Cambiar a otra rutina" : "Iniciar sesión";
-  els.startSessionBtn.classList.toggle("ghost", active);
-  els.endSessionBtn.classList.toggle("ghost", true);
-  els.copyLastSessionBtn.classList.toggle("ghost", true);
-  els.sessionRoutineSelect.value = state.session.routineId || els.sessionRoutineSelect.value || "";
+  const routines = state.routines.filter((routine) => {
+    const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
+    if (!dayMatches) return false;
+    if (!search) return true;
+    const haystack = [
+      routine.name,
+      routine.day,
+      routine.focus,
+      routine.notes,
+      ...(routine.exercises || []).flatMap((item) => [item.name, item.block, item.notes, item.muscleGroup])
+    ].filter(Boolean).join(" ");
+    return normalizeNameForMatch(haystack).includes(search);
+  });
 
-  if (!active) {
-    els.activeSessionCard.innerHTML = emptyHtml("Selecciona una rutina e inicia la sesión para ver un flujo guiado de ahora / siguiente / pendientes.");
+  if (els.routineFilterSummary) {
+    const bits = [];
+    if (search) bits.push(`búsqueda "${String(state.ui.routineSearch || "").trim()}"`);
+    if (dayFilter !== "all") bits.push(`bloque ${dayFilter}`);
+    els.routineFilterSummary.textContent = bits.length
+      ? `${routines.length} rutinas visibles · filtros: ${bits.join(" · ")}.`
+      : `${routines.length} rutinas disponibles en biblioteca.`;
+  }
+
+  if (!routines.length) {
+    els.routineList.innerHTML = emptyHtml(state.routines.length ? "No hay rutinas que coincidan con los filtros." : "No hay rutinas todavía.");
     return;
   }
 
-  const effectiveCompleted = (routine.exercises || []).filter((exercise) => getExerciseCompletionStatus(state, exercise).completed).length;
-  const skippedCount = (routine.exercises || []).filter((exercise) => isExerciseSkipped(state, exercise.id)).length;
-  const pendingCount = Math.max(0, routine.exercises.length - effectiveCompleted - skippedCount);
-  const workingSetCount = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
-  const warmupSetCount = state.session.setEntries.filter((entry) => entry.isWarmup).length;
-  const progressBase = routine.exercises.length || 1;
-  const progress = Math.round((effectiveCompleted / progressBase) * 100);
-  const nextExerciseId = getNextSuggestedExerciseId(state, state.session.currentExerciseId || routine.exercises[0]?.id);
-  const nextName = routine.exercises.find((exercise) => exercise.id === nextExerciseId)?.name || routine.exercises[0]?.name || "—";
-  const currentExercise = routine.exercises.find((exercise) => exercise.id === nextExerciseId) || routine.exercises[0] || null;
-  const currentSuggestion = currentExercise ? nextLoadSuggestionForExercise(state, currentExercise) : null;
+  els.routineList.innerHTML = routines.map((routine) => {
+    const meta = buildRoutineMetadata(state, routine);
+    const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
+    const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
+    const isActive = activeRoutineId === routine.id;
+    const lastUsedLabel = meta.lastDate ? `${formatDate(meta.lastDate)} · ${relativeDaysLabel(daysBetween(meta.lastDate, todayLocal()))}` : "Aún sin usar";
+    return `
+      <article class="list-item routine-card ${isActive ? "routine-card--active" : ""}">
+        <div class="list-head">
+          <div>
+            <h3 class="list-title">${routine.name}</h3>
+            <p class="list-subtitle">${routine.day || "Sin bloque"} · ${routine.focus || "Sin foco"}</p>
+          </div>
+          <span class="chip ${isActive ? "success" : "ghost"}">${isActive ? "Sesión activa" : lastUsedLabel}</span>
+        </div>
+        <div class="chip-row">
+          <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
+          <span class="chip ghost">${meta.totalSets} series</span>
+          <span class="chip ghost">~${estimatedMinutes} min</span>
+          <span class="chip ${meta.complexityScore >= 24 ? "warning" : meta.complexityScore >= 16 ? "success" : "ghost"}">${meta.complexityLabel}</span>
+          ${meta.blockCount ? `<span class="chip ghost">${meta.blockCount} bloques</span>` : ""}
+          ${blockPreview.map((block) => `<span class="chip ghost">${block}</span>`).join("")}
+        </div>
+        <div class="routine-preview-list">
+          ${(routine.exercises || []).slice(0, 5).map((exercise) => `
+            <div class="routine-preview-row">
+              <strong>${exercise.block ? `${exercise.block} · ` : ""}${exercise.name}</strong>
+              <span>${exercise.sets}×${exercise.reps} · ${exercise.rest}s</span>
+            </div>
+          `).join("")}
+          ${routine.exercises.length > 5 ? `<p class="helper-line">+${routine.exercises.length - 5} ejercicios más</p>` : ""}
+        </div>
+        <div class="actions-row">
+          <button data-action="start-routine" data-id="${routine.id}">${isActive ? "Continuar sesión" : "Iniciar sesión"}</button>
+          <button class="ghost small" data-action="edit-routine" data-id="${routine.id}">Editar</button>
+          <button class="ghost small" data-action="duplicate-routine" data-id="${routine.id}">Duplicar</button>
+          <button class="ghost small danger-ghost" data-action="delete-routine" data-id="${routine.id}">Eliminar</button>
+        </div>
+      </article>
+    `;
+  }).join("");
+}
 
-  const header = `
-    <div class="list-item highlight session-header-card">
+export function renderWorkoutList(state, els) {
+  const feed = buildHistoryFeed(state);
+  renderHistoryFilterSummary(state, els, feed.length);
+  if (!feed.length) {
+    els.workoutList.innerHTML = emptyHtml("No hay registros con esos filtros.");
+    return;
+  }
+
+  let lastDate = "";
+  els.workoutList.innerHTML = feed.map((item) => {
+    const separator = item.date !== lastDate ? `<p class="history-day-separator">${formatDate(item.date)}</p>` : "";
+    lastDate = item.date;
+    return `${separator}${item.kind === "session" ? renderSessionHistoryCard(item) : renderManualHistoryCard(item)}`;
+  }).join("");
+}
+
+function renderHistoryFilterSummary(state, els, total) {
+  if (!els.logFilterSummary) return;
+  const active = [];
+  if (state.ui.logSearch) active.push(`texto "${state.ui.logSearch}"`);
+  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina");
+  if (state.ui.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
+  if (state.ui.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
+  if (state.ui.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
+  els.logFilterSummary.textContent = active.length
+    ? `${total} resultados · filtros activos: ${active.join(" · ")}.`
+    : `${total} resultados · vista completa.`;
+}
+
+function renderSessionHistoryCard(item) {
+  return `
+    <article class="list-item history-card history-card--session">
       <div class="list-head">
         <div>
-          <h3 class="list-title">${escapeHtml(routine.name)}</h3>
-          <p class="list-subtitle">${escapeHtml(routine.focus || "Sin foco")} · ${routine.exercises.length} ejercicios planificados</p>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">Sesión completa · ${item.exercisesCompleted} ejercicios · ${formatDuration(item.durationSeconds || 0)}</p>
         </div>
-        <span class="chip success">${effectiveCompleted}/${routine.exercises.length} completos</span>
+        <span class="chip success">${formatNumber(item.volume)} kg</span>
       </div>
       <div class="chip-row">
-        <span class="chip ghost">${workingSetCount} efectivas</span>
-        <span class="chip ghost">${warmupSetCount} warm-up</span>
-        <span class="chip ghost">${pendingCount} pendientes</span>
-        ${state.session.notes?.trim() ? `<span class="chip warning">Con notas</span>` : ""}
+        <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
+        <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
+        <span class="chip ghost">${item.exercisesCompleted ?? 0} ejercicios</span>
+        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${group}</span>`).join("")}
       </div>
-      <div class="session-progress">
-        <div class="progress-bar"><span style="width:${progress}%"></span></div>
-        <strong>${progress}%</strong>
-      </div>
-      <div class="session-flow-row">
-        <div class="session-flow-pill session-flow-pill--focus"><strong>Ahora</strong><span>${escapeHtml(nextName)}</span></div>
-        <div class="session-flow-pill"><strong>Después</strong><span>${pendingCount > 1 ? `${pendingCount - 1} ejercicios` : "Cierre de sesión"}</span></div>
-        <div class="session-flow-pill"><strong>Resumen</strong><span>${workingSetCount} efectivas · ${warmupSetCount} warm-up · ${skippedCount} omitidos</span></div>
-      </div>
-    </div>
-  `;
-  const sticky = `
-    <div class="session-sticky-rail" role="region" aria-label="Acciones rápidas de sesión">
-      <div>
-        <p class="eyebrow-dark">Ahora</p>
-        <strong>${escapeHtml(currentExercise?.name || "Sin foco")}</strong>
-        <p class="helper-line">Siguiente sugerencia: ${currentSuggestion ? `${formatNumber(currentSuggestion.value)} kg` : "—"} · ${pendingCount} pendientes</p>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      <div class="history-session-exercises">
+        ${item.exercises.slice(0, 4).map((exercise) => `
+          <div class="history-mini-row">
+            <strong>${exercise.exercise}</strong>
+            <span>${exercise.setCount} series · ${formatNumber(exercise.maxWeight)} kg top</span>
+          </div>
+        `).join("")}
       </div>
       <div class="actions-row">
-        <button class="ghost small" data-action="focus-current-exercise" data-id="${nextExerciseId || ""}">Ir al ejercicio</button>
-        <button class="ghost small" data-action="jump-next-exercise" data-id="${nextExerciseId || ""}">Saltar al siguiente pendiente</button>
+        <button class="ghost small" data-action="start-routine" data-id="${item.routineId}">Repetir hoy</button>
+        <button class="ghost small" data-action="edit-session-history" data-id="${item.sessionId}">Corregir series</button>
+        <button class="ghost small danger-ghost" data-action="delete-session-history" data-id="${item.sessionId}">Borrar sesión</button>
       </div>
-    </div>
+    </article>
   `;
-
-  const cards = routine.exercises.map((exercise, index) => renderExerciseCard(state, exercise, index, nextExerciseId)).join("");
-  els.activeSessionCard.innerHTML = header + sticky + cards;
 }
 
-function renderExerciseCard(state, exercise, index, nextExerciseId) {
-  const reference = getExerciseReference(state, exercise.catalogId || exercise.exerciseKey || exercise.name, state.session.routineId)
-    || getExerciseReference(state, exercise.catalogId || exercise.exerciseKey || exercise.name);
-  const entries = getSessionEntriesByExercise(state, exercise.id);
-  const status = getExerciseCompletionStatus(state, exercise);
-  const suggestion = nextLoadSuggestionForExercise(state, exercise);
-  const repRange = parseRepRange(exercise.reps);
-  const restDefault = exercise.rest || state.preferences.defaultRestSeconds;
-  const latestEntry = entries[entries.length - 1] || null;
-  const suggestedWeight = latestEntry ? latestEntry.weight : (reference?.weight ?? suggestion.value ?? 0);
-  const suggestedReps = latestEntry ? latestEntry.reps : extractMainRep(exercise.reps);
-  const suggestedRest = latestEntry?.rest ?? restDefault;
-  const plannedSets = Array.from({ length: Number(exercise.sets || 0) }, (_, setIndex) => {
-    const done = status.workingEntries.length > setIndex;
-    return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
-  }).join("");
-  const isNext = nextExerciseId === exercise.id && !status.completed && !status.skipped;
-  const stateClass = `${status.skipped ? "skipped" : status.completed ? "completed is-completed-collapsed" : status.inProgress ? "in-progress" : ""} ${isNext ? "is-next" : ""}`.trim();
-  const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (entries.length && !status.completed);
-  const summary = `
-    <summary class="session-exercise-summary">
-      <strong>${index + 1}. ${escapeHtml(exercise.name)}</strong>
-      <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : isNext ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado" : isNext ? "Ahora toca" : "Pendiente"}</span>
-    </summary>
-  `;
-
+function renderManualHistoryCard(item) {
   return `
-    <details class="session-exercise ${stateClass}" id="exercise-card-${exercise.id}" ${shouldExpand ? "open" : ""}>
-      ${summary}
-      <div class="session-exercise-body">
-      <div class="session-exercise-top">
+    <article class="list-item history-card history-card--manual">
+      <div class="list-head">
         <div>
-          <div class="exercise-title-row">
-            <h3 class="list-title">${index + 1}. ${escapeHtml(exercise.name)}</h3>
-            ${exercise.block ? `<span class="chip ghost">${escapeHtml(exercise.block)}</span>` : ""}
-          </div>
-          <p class="list-subtitle">${exercise.sets || "—"} series objetivo · ${escapeHtml(String(exercise.reps || "—"))} reps · descanso ${restDefault}s</p>
+          <h3 class="list-title">${item.title}</h3>
+          <p class="list-subtitle">Registro manual${item.routineName ? ` · ${item.routineName}` : ""}</p>
         </div>
-        <div class="actions-row actions-row--tight">
-          <button class="ghost small" data-action="toggle-skip-exercise" data-id="${exercise.id}">${status.skipped ? "Reactivar" : "Omitir"}</button>
-        </div>
+        <span class="chip ghost">${formatNumber(item.maxWeight)} kg top</span>
       </div>
-
-      <div class="planned-sets" aria-label="Series objetivo">
-        ${plannedSets || `<span class="planned-set">Sin series objetivo</span>`}
-      </div>
-
       <div class="chip-row">
-        <span class="chip ghost">Último top set: ${reference ? `${formatNumber(reference.weight)} kg × ${reference.reps}` : "—"}</span>
-        <span class="chip ${suggestion.decision === "up" ? "success" : suggestion.decision === "down" ? "warning" : "ghost"}">Siguiente carga: ${formatNumber(suggestion.value)} kg</span>
-        <span class="chip ghost">Rango objetivo: ${repRange.max ? `${repRange.min}-${repRange.max}` : repRange.min || "—"}</span>
-        <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : nextExerciseId === exercise.id ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado automático" : nextExerciseId === exercise.id ? "Ahora toca" : `${status.workingEntries.length} guardadas`}</span>
+        <span class="chip ghost">${item.setCount} series</span>
+        <span class="chip ghost">${item.repsLabel}</span>
+        <span class="chip warning">e1RM ${formatNumber(item.bestE1rm)} kg</span>
+        <span class="chip ghost">Volumen ${formatNumber(item.volume)} kg</span>
       </div>
-      <p class="helper-line">${escapeHtml(status.skipped ? "Ejercicio apartado temporalmente para no romper el flujo. Puedes reactivarlo cuando quieras." : suggestion.reason)}</p>
-      ${isNext ? `<p class="helper-line helper-line--strong">Este ejercicio está en foco ahora.</p>` : ""}
-      ${status.inProgress && !status.completed ? `<p class="helper-line helper-line--strong">Llevas ${status.workingEntries.length}/${status.targetSets || "?"} series efectivas.</p>` : ""}
-      ${exercise.notes ? `<p class="helper-line helper-line--strong">Nota: ${escapeHtml(exercise.notes)}</p>` : ""}
-
-      <div class="session-series-grid">
-        <div class="quick-input-group">
-          <label for="session-weight-${exercise.id}">Kg</label>
-          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${exercise.id}" value="${suggestedWeight}" />
-        </div>
-        <div class="quick-input-group">
-          <label for="session-reps-${exercise.id}">Reps</label>
-          <input inputmode="numeric" type="number" step="1" min="1" placeholder="Reps" id="session-reps-${exercise.id}" value="${suggestedReps}" />
-        </div>
-        <div class="quick-input-group quick-input-group--small">
-          <label for="session-rpe-${exercise.id}">RPE</label>
-          <input inputmode="decimal" type="number" step="0.5" min="1" max="10" placeholder="RPE" id="session-rpe-${exercise.id}" value="" />
-        </div>
-        <div class="quick-input-group quick-input-group--small">
-          <label for="session-rest-${exercise.id}">Descanso</label>
-          <input inputmode="numeric" type="number" min="0" step="15" placeholder="Segundos" id="session-rest-${exercise.id}" value="${suggestedRest}" />
-        </div>
-        <label class="switch-row compact-switch quick-switch">
-          <input type="checkbox" id="session-warmup-${exercise.id}" />
-          <span>Warm-up</span>
-        </label>
-        <button data-action="add-session-set" data-id="${exercise.id}" ${status.skipped ? "disabled" : ""}>Guardar serie</button>
+      ${item.notes ? `<p class="helper-line history-note-line">📝 ${item.notes}</p>` : ""}
+      <div class="actions-row">
+        <button class="ghost small" data-action="edit-history-group" data-id="${item.groupId}">Corregir</button>
+        <button class="ghost small danger-ghost" data-action="delete-workout-group" data-id="${item.groupId}">Borrar bloque</button>
       </div>
-
-      <div class="session-quick-actions">
-        <button class="ghost small" data-action="fill-last-session-values" data-id="${exercise.id}" ${reference ? "" : "disabled"}>Usar última referencia</button>
-        <button class="ghost small" data-action="repeat-last-session-set" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Rellenar última serie</button>
-        <button class="ghost small" data-action="save-last-session-set-again" data-id="${exercise.id}" ${latestEntry ? "" : "disabled"}>Guardar misma serie otra vez</button>
-      </div>
-
-      ${entries.length ? buildSessionTable(entries) : `<p class="helper-line">Todavía no has guardado series para este ejercicio en esta sesión.</p>`}
-      </div>
-    </details>
+    </article>
   `;
 }
 
-function buildSessionTable(entries) {
-  return `
-    <div class="session-table-wrap">
-      <table class="session-table">
-        <thead>
-          <tr>
-            <th>#</th>
-            <th>Tipo</th>
-            <th>Peso</th>
-            <th>Reps</th>
-              <th>RPE</th>
-              <th>Descanso</th>
-              <th>Acción</th>
-            </tr>
-        </thead>
-        <tbody>
-          ${entries.map((entry, index) => `
-            <tr>
-              <td>${index + 1}</td>
-              <td>${entry.isWarmup ? "Calentamiento" : "Efectiva"}</td>
-              <td>${formatNumber(entry.weight)} kg</td>
-              <td>${entry.reps}</td>
-              <td>${entry.rpe === "" ? "—" : entry.rpe}</td>
-              <td>${entry.rest || "—"}s</td>
-              <td class="session-row-actions">
-                <button class="ghost small" data-action="prefill-session-set" data-id="${entry.id}">Cargar</button>
-                <button class="ghost small" data-action="edit-session-set" data-id="${entry.id}">Editar</button>
-                <button class="ghost small" data-action="delete-session-set" data-id="${entry.id}">Quitar</button>
-              </td>
-            </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    </div>
-  `;
+export function renderPrList(state, els) {
+  const items = buildPrItems(state);
+  if (!items.length) {
+    els.prList.innerHTML = emptyHtml("Sin datos todavía.");
+    return;
+  }
+
+  els.prList.innerHTML = items.map((item) => cardHtml({
+    title: item.exercise,
+    subtitle: `Carga ${formatNumber(item.bestWeight.weight)} kg · e1RM ${formatNumber(item.bestE1rm.weight * (1 + item.bestE1rm.reps / 30))} kg`,
+    chips: [
+      { label: `Último ${formatDate(item.latest.date)}`, type: "ghost" },
+      { label: `PR reciente ${formatDate(item.bestE1rm.date)}`, type: "ghost" },
+      { label: `${item.deltaVsPrevBest >= 0 ? "+" : ""}${formatNumber(item.deltaVsPrevBest)} kg vs PR anterior`, type: item.deltaVsPrevBest >= 0 ? "success" : "warning" }
+    ]
+  })).join("");
+}
+
+export function renderMeasurements(state, els) {
+  const measurements = buildMeasurementRows(state);
+  const trendLabel = (delta) => {
+    if (delta == null) return "Sin tendencia";
+    if (Math.abs(delta) < 0.2) return "Estable";
+    return delta < 0 ? "Mejorando" : "Deriva al alza";
+  };
+  els.measurementList.innerHTML = measurements.length ? measurements.map((item) => `
+    <article class="list-item measurement-card">
+      <div class="list-head">
+        <div>
+          <h3 class="list-title">${formatDate(item.date)}</h3>
+          <p class="list-subtitle">Peso ${item.bodyWeight !== "" && item.bodyWeight != null ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Cintura ${item.waist !== "" && item.waist != null ? `${formatNumber(item.waist)} cm` : "—"}</p>
+        </div>
+        <span class="chip ghost">Sueño ${item.sleepHours !== "" && item.sleepHours != null ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
+      </div>
+      <div class="chip-row">
+        <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : `${item.deltaBodyWeight < 0 ? "↘ " : item.deltaBodyWeight > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyWeight, " kg")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : `${item.deltaWaist < 0 ? "↘ " : item.deltaWaist > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaWaist, " cm")}`}</span>
+        <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : `${item.deltaBodyFat < 0 ? "↘ " : item.deltaBodyFat > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyFat, " %")}`}</span>
+        <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">${trendLabel(item.deltaWaist)}</span>
+        <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
+        <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
+        <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
+      </div>
+      <div class="actions-row">
+        <button class="ghost small" data-action="edit-measurement" data-id="${item.id}">Editar</button>
+        <button class="ghost small" data-action="delete-measurement" data-id="${item.id}">Borrar</button>
+      </div>
+    </article>
+  `).join("") : emptyHtml("Todavía no hay mediciones.");
 }
