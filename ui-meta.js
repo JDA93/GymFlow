@@ -16,6 +16,14 @@ import {
 import { buildBarChart, buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
 import { formatDate, formatNumber, percentage, daysBetween, todayLocal } from "./utils.js";
 
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function hasValue(value) {
+  return value !== "" && value != null;
+}
+
 export function renderAnalytics(state, els, exerciseOptions) {
   renderAnalyticsHighlights(state, els);
   renderAnalyticsCharts(state, els, exerciseOptions);
@@ -40,20 +48,21 @@ function renderAnalyticsHighlights(state, els) {
     ]
   });
   const keyItems = items.slice(0, 2).map((item) => cardHtml(item));
-  els.analyticsHighlights.innerHTML = [summary, ...keyItems].join("");
+  els.analyticsHighlights.innerHTML = [summary, ...keyItems].join("") || emptyHtml("Todavía no hay highlights para mostrar.");
 }
 
 function renderAnalyticsCharts(state, els, exerciseOptions) {
-  if (!exerciseOptions.length) {
+  const safeOptions = ensureArray(exerciseOptions);
+  if (!safeOptions.length) {
     els.analyticsLiftSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
     state.ui.analyticsLiftId = "";
-    els.analyticsLiftChart.innerHTML = emptyHtml("Sin ejercicios para analizar.");
+    els.analyticsLiftChart.innerHTML = emptyHtml("Aún no hay ejercicios con histórico para analizar.");
   } else {
-    if (!state.ui.analyticsLiftId || !exerciseOptions.some((item) => item.id === state.ui.analyticsLiftId)) {
-      state.ui.analyticsLiftId = exerciseOptions[0].id;
+    if (!state.ui.analyticsLiftId || !safeOptions.some((item) => item.id === state.ui.analyticsLiftId)) {
+      state.ui.analyticsLiftId = safeOptions[0].id;
     }
     const fragment = document.createDocumentFragment();
-    exerciseOptions.forEach((item) => {
+    safeOptions.forEach((item) => {
       const option = document.createElement("option");
       option.value = String(item.id || "");
       option.textContent = String(item.name || "");
@@ -63,16 +72,16 @@ function renderAnalyticsCharts(state, els, exerciseOptions) {
     els.analyticsLiftSelect.appendChild(fragment);
     els.analyticsLiftSelect.value = state.ui.analyticsLiftId;
     const liftPoints = buildExerciseChartPoints(state, state.ui.analyticsLiftId, "e1rm", state.ui.chartAggregation || "day");
-    els.analyticsLiftChart.innerHTML = liftPoints.length >= 2 ? buildLineChart(liftPoints, " kg", "Evolución de e1RM") : emptyHtml("Necesitas al menos dos referencias del ejercicio.");
+    els.analyticsLiftChart.innerHTML = liftPoints.length >= 2 ? buildLineChart(liftPoints, " kg", "Evolución de e1RM") : emptyHtml("Necesitas al menos dos referencias del ejercicio para ver tendencia.");
   }
 
   const weeklyVolume = buildWeeklyVolumeSeries(state);
   const weeklyFrequency = buildWeeklyFrequencySeries(state);
   const monthlyVolume = buildMonthlyVolumeSeries(state);
 
-  els.analyticsFrequencyChart.innerHTML = weeklyFrequency.length ? buildBarChart(weeklyFrequency, " días", "Frecuencia semanal") : emptyHtml("Sin semanas suficientes.");
-  els.analyticsVolumeChart.innerHTML = weeklyVolume.length ? buildBarChart(weeklyVolume, " kg", "Volumen semanal") : emptyHtml("Sin volumen suficiente.");
-  els.analyticsMonthlyChart.innerHTML = monthlyVolume.length ? buildBarChart(monthlyVolume, " kg", "Comparación mensual") : emptyHtml("Sin meses suficientes.");
+  els.analyticsFrequencyChart.innerHTML = weeklyFrequency.length ? buildBarChart(weeklyFrequency, " días", "Frecuencia semanal") : emptyHtml("Aún no hay semanas con datos para frecuencia.");
+  els.analyticsVolumeChart.innerHTML = weeklyVolume.length ? buildBarChart(weeklyVolume, " kg", "Volumen semanal") : emptyHtml("Aún no hay semanas con volumen registrado.");
+  els.analyticsMonthlyChart.innerHTML = monthlyVolume.length ? buildBarChart(monthlyVolume, " kg", "Comparación mensual") : emptyHtml("Todavía no hay meses comparables.");
 }
 
 function renderAnalyticsDeep(state, els) {
@@ -129,9 +138,11 @@ function renderAnalyticsDeep(state, els) {
 }
 
 export function renderGoalSummary(state, els) {
-  const goals = state.goals;
-  const latestMeasurement = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-  const oldestMeasurement = [...state.measurements].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
+  const goals = state?.goals || { resultGoals: {}, habits: {} };
+  const resultGoalValues = goals.resultGoals || {};
+  const measurements = ensureArray(state?.measurements);
+  const latestMeasurement = [...measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  const oldestMeasurement = [...measurements].sort((a, b) => String(a.date).localeCompare(String(b.date)))[0];
   const bestMap = computeBestLiftMap(state);
   const firstLiftMap = computeFirstLiftMap(state);
   const cards = [];
@@ -157,7 +168,7 @@ export function renderGoalSummary(state, els) {
       current: latestMeasurement?.bodyWeight,
       baseline: oldestMeasurement?.bodyWeight,
       baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.bodyWeight,
+      target: resultGoalValues.bodyWeight,
       suffix: "kg"
     },
     {
@@ -166,7 +177,7 @@ export function renderGoalSummary(state, els) {
       current: latestMeasurement?.waist,
       baseline: oldestMeasurement?.waist,
       baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.waist,
+      target: resultGoalValues.waist,
       suffix: "cm"
     },
     {
@@ -175,7 +186,7 @@ export function renderGoalSummary(state, els) {
       current: latestMeasurement?.bodyFat,
       baseline: oldestMeasurement?.bodyFat,
       baselineDate: oldestMeasurement?.date || "",
-      target: goals.resultGoals.bodyFat,
+      target: resultGoalValues.bodyFat,
       suffix: "%"
     },
     {
@@ -184,7 +195,7 @@ export function renderGoalSummary(state, els) {
       current: bestMap["bench-press"]?.value,
       baseline: firstLiftMap["bench-press"]?.value,
       baselineDate: firstLiftMap["bench-press"]?.date || "",
-      target: goals.resultGoals.bench,
+      target: resultGoalValues.bench,
       suffix: "kg"
     },
     {
@@ -193,7 +204,7 @@ export function renderGoalSummary(state, els) {
       current: bestMap["squat"]?.value,
       baseline: firstLiftMap["squat"]?.value,
       baselineDate: firstLiftMap["squat"]?.date || "",
-      target: goals.resultGoals.squat,
+      target: resultGoalValues.squat,
       suffix: "kg"
     },
     {
@@ -202,12 +213,12 @@ export function renderGoalSummary(state, els) {
       current: bestMap["deadlift"]?.value || bestMap["romanian-deadlift"]?.value,
       baseline: firstLiftMap["deadlift"]?.value || firstLiftMap["romanian-deadlift"]?.value,
       baselineDate: firstLiftMap["deadlift"]?.date || firstLiftMap["romanian-deadlift"]?.date || "",
-      target: goals.resultGoals.deadlift,
+      target: resultGoalValues.deadlift,
       suffix: "kg"
     }
   ];
 
-  resultGoals.filter((goal) => goal.target !== "" && goal.target != null).forEach((goal) => cards.push(goalCard(goal, goals.goalDate)));
+  resultGoals.filter((goal) => hasValue(goal.target)).forEach((goal) => cards.push(goalCard(goal, goals.goalDate)));
 
   const habitCards = buildHabitGoalCards(goals.habits, latestMeasurement, state);
   cards.push(...habitCards);
@@ -220,6 +231,7 @@ export function renderGoalSummary(state, els) {
 }
 
 function buildGoalDateStatus(goalDate) {
+  if (!goalDate) return "";
   const remaining = daysBetween(todayLocal(), goalDate);
   if (remaining > 0) return `Quedan ${remaining} días`;
   if (remaining === 0) return "Fecha objetivo hoy";
@@ -275,29 +287,30 @@ function buildPaceLabel({ baseline, baselineDate, current, target, goalDate }) {
 }
 
 function buildHabitGoalCards(habits, latestMeasurement, state) {
+  const safeHabits = habits || {};
   const cards = [];
-  const workoutCurrent = [...state.workouts.filter((item) => !item.isWarmup).reduce((acc, item) => { acc.add(item.date); return acc; }, new Set())].filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-  if (habits.workoutsPerWeek !== "" && habits.workoutsPerWeek != null) {
-    const target = Number(habits.workoutsPerWeek);
+  const workoutCurrent = [...ensureArray(state?.workouts).filter((item) => !item.isWarmup).reduce((acc, item) => { acc.add(item.date); return acc; }, new Set())].filter((date) => daysBetween(date, todayLocal()) <= 6).length;
+  if (hasValue(safeHabits.workoutsPerWeek)) {
+    const target = Number(safeHabits.workoutsPerWeek);
     cards.push(cardHtml({
       title: "Hábito: entrenar por semana",
       subtitle: `${workoutCurrent}/${target} sesiones esta semana.`,
       chips: [{ label: workoutCurrent >= target ? "Vas en ritmo" : "No vas en ritmo", type: workoutCurrent >= target ? "success" : "warning" }]
     }));
   }
-  if (habits.sleepHours !== "" && habits.sleepHours != null) {
+  if (hasValue(safeHabits.sleepHours)) {
     const current = latestMeasurement?.sleepHours === "" || latestMeasurement?.sleepHours == null ? null : Number(latestMeasurement.sleepHours);
-    const target = Number(habits.sleepHours);
+    const target = Number(safeHabits.sleepHours);
     cards.push(cardHtml({
       title: "Hábito: sueño",
       subtitle: current == null ? `Objetivo ${target} h. Sin dato actual.` : `Último dato ${formatNumber(current)} h · objetivo ${target} h.`,
       chips: [{ label: current != null && current >= target ? "Vas en ritmo" : "No vas en ritmo", type: current != null && current >= target ? "success" : "warning" }]
     }));
   }
-  if (habits.measureEveryDays !== "" && habits.measureEveryDays != null) {
+  if (hasValue(safeHabits.measureEveryDays)) {
     const lastMeasurementDate = latestMeasurement?.date || null;
     const gap = lastMeasurementDate ? daysBetween(lastMeasurementDate, todayLocal()) : null;
-    const target = Number(habits.measureEveryDays);
+    const target = Number(safeHabits.measureEveryDays);
     cards.push(cardHtml({
       title: "Hábito: medir progreso",
       subtitle: gap == null ? `Objetivo cada ${target} días. Aún no hay mediciones.` : `Han pasado ${gap} días desde la última medición.`,
@@ -308,7 +321,7 @@ function buildHabitGoalCards(habits, latestMeasurement, state) {
 }
 
 export function renderGoalForm(state, els) {
-  const goals = state.goals;
+  const goals = state?.goals || { resultGoals: {}, habits: {} };
   if (els.goalForm.athleteName) els.goalForm.athleteName.value = goals.athleteName || "";
   if (els.goalForm.focusGoal) els.goalForm.focusGoal.value = goals.focusGoal || "";
   if (els.goalForm.goalDate) els.goalForm.goalDate.value = goals.goalDate || "";
@@ -321,7 +334,7 @@ export function renderGoalForm(state, els) {
 }
 
 export function renderPreferencesForm(state, els) {
-  Object.entries(state.preferences).forEach(([key, value]) => {
+  Object.entries(state?.preferences || {}).forEach(([key, value]) => {
     if (!els.preferencesForm[key]) return;
     if (typeof value === "boolean") els.preferencesForm[key].checked = value;
     else els.preferencesForm[key].value = value;

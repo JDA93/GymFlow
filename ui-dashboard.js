@@ -11,11 +11,19 @@ import {
 import { buildLineChart, cardHtml, emptyHtml } from "./ui-common.js";
 import { escapeHtml, formatDate, formatDuration, formatNumber, relativeDaysLabel, daysBetween, todayLocal } from "./utils.js";
 
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function hasMetric(value) {
+  return value !== "" && value != null;
+}
+
 export function renderStats(state, els) {
   const stats = computeStats(state);
   els.statSessionsMonth.textContent = stats.daysTrainedThisMonth;
   els.statStreak.textContent = String(stats.continuityActive);
-  els.statWeight.textContent = stats.latestMeasurement?.bodyWeight !== "" && stats.latestMeasurement?.bodyWeight != null ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
+  els.statWeight.textContent = hasMetric(stats.latestMeasurement?.bodyWeight) ? `${formatNumber(stats.latestMeasurement.bodyWeight)} kg` : "—";
   els.statBestLift.textContent = stats.bestLift ? `${formatNumber(stats.bestLift.weight)} kg` : "—";
   els.statBestLiftLabel.textContent = stats.bestLift ? stats.bestLift.exercise : "Sin datos";
   els.statBestE1rm.textContent = stats.bestE1rm ? `${formatNumber(stats.bestE1rm.value)} kg` : "—";
@@ -39,20 +47,21 @@ function buildTodayInsight(state, suggestion) {
   }
   const weeklyTarget = Number(state.goals?.habits?.workoutsPerWeek || 0);
   if (weeklyTarget > 0) {
-    const recentDays = [...new Set(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date))]
+    const recentDays = [...new Set(ensureArray(state?.workouts).filter((item) => !item.isWarmup).map((item) => item.date))]
       .filter((date) => daysBetween(date, todayLocal()) <= 6).length;
     if (recentDays < weeklyTarget) return `Te faltan ${weeklyTarget - recentDays} sesiones para cumplir el objetivo semanal.`;
   }
-  return "Prioriza la siguiente acción y ejecuta sin fricción.";
+  return "Prioriza una acción simple hoy y mantén la continuidad.";
 }
 
 function renderPrimaryAction(state, els) {
   const suggestion = getSuggestedRoutine(state);
-  const active = state.session.active;
+  const active = Boolean(state?.session?.active);
   if (active) {
-    const volume = state.session.setEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
-    const workingSets = state.session.setEntries.filter((entry) => !entry.isWarmup).length;
-    const warmupSets = state.session.setEntries.filter((entry) => entry.isWarmup).length;
+    const sessionEntries = ensureArray(state?.session?.setEntries);
+    const volume = sessionEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+    const workingSets = sessionEntries.filter((entry) => !entry.isWarmup).length;
+    const warmupSets = sessionEntries.filter((entry) => entry.isWarmup).length;
     els.dashboardPrimaryCard.innerHTML = `
       <div class="hero-copy">
         <span class="pill">En curso</span>
@@ -101,7 +110,7 @@ function renderPrimaryAction(state, els) {
 function renderLauncher(state, els) {
   const suggestion = getSuggestedRoutine(state);
   const cards = [];
-  if (state.session.active) {
+  if (state?.session?.active) {
     cards.push(cardHtml({
       title: "Continuar sesión activa",
       subtitle: "Retoma exactamente donde te quedaste.",
@@ -129,7 +138,7 @@ function renderLauncher(state, els) {
 
 function renderQuickSignals(state, els) {
   const trendItems = buildTrendItems(state);
-  const stalledExercise = detectPotentialStall(state)[0] || null;
+  const stalledExercise = ensureArray(detectPotentialStall(state))[0] || null;
   const cards = trendItems.slice(0, 3).map((item) => cardHtml(item));
   if (stalledExercise) {
     cards.push(cardHtml({
@@ -141,7 +150,7 @@ function renderQuickSignals(state, els) {
       ]
     }));
   }
-  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Todavía no hay señales suficientes.");
+  els.quickSignals.innerHTML = cards.length ? cards.join("") : emptyHtml("Aún no hay suficiente histórico para señales útiles. Empieza con un par de registros.");
 }
 
 function renderRecentStory(state, els) {
@@ -165,18 +174,19 @@ function renderRecentStory(state, els) {
 }
 
 function renderExerciseSelect(state, els, exerciseOptions) {
-  if (!exerciseOptions.length) {
+  const safeOptions = ensureArray(exerciseOptions);
+  if (!safeOptions.length) {
     els.dashboardExerciseSelect.innerHTML = `<option value="">Sin ejercicios</option>`;
     state.ui.dashboardExerciseId = "";
     return;
   }
 
-  if (!state.ui.dashboardExerciseId || !exerciseOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
-    state.ui.dashboardExerciseId = exerciseOptions[0].id;
+  if (!state.ui.dashboardExerciseId || !safeOptions.some((item) => item.id === state.ui.dashboardExerciseId)) {
+    state.ui.dashboardExerciseId = safeOptions[0].id;
   }
 
   const fragment = document.createDocumentFragment();
-  exerciseOptions.forEach((item) => {
+  safeOptions.forEach((item) => {
     const option = document.createElement("option");
     option.value = String(item.id || "");
     option.textContent = String(item.name || "");
@@ -195,7 +205,9 @@ function renderExerciseChart(state, els) {
   const points = buildExerciseChartPoints(state, state.ui.dashboardExerciseId, metric, state.ui.chartAggregation || "day");
   const suffix = metric === "volume" ? " kg" : metric === "reps" ? " reps" : " kg";
   const metricLabel = { weight: "Carga máxima", e1rm: "e1RM", volume: "Volumen", reps: "Repeticiones" }[metric] || "Carga";
-  els.exerciseChart.innerHTML = points.length >= 2 ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`) : emptyHtml("Necesitas al menos 2 referencias del ejercicio para ver evolución.");
+  els.exerciseChart.innerHTML = points.length >= 2
+    ? buildLineChart(points, suffix, `${metricLabel} del ejercicio`)
+    : emptyHtml("Aún no hay suficiente histórico para esta gráfica. Registra más series de este ejercicio.");
 }
 
 function renderBodyChart(state, els) {
@@ -203,8 +215,8 @@ function renderBodyChart(state, els) {
   const points = buildBodyChartPoints(state, metric);
   const suffix = metric === "bodyFat" ? "%" : metric === "sleepHours" ? " h" : metric === "bodyWeight" ? " kg" : " cm";
   const label = BODY_METRIC_LABELS[metric] || "Métrica corporal";
-  const latest = [...state.measurements].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+  const latest = [...ensureArray(state?.measurements)].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
   els.bodyChart.innerHTML = points.length >= 2
-    ? `${latest ? `<div class="mini-insight">Última lectura: ${latest[metric] !== "" && latest[metric] != null ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
-    : emptyHtml("Necesitas al menos 2 mediciones para esta métrica.");
+    ? `${latest ? `<div class="mini-insight">Última lectura: ${hasMetric(latest[metric]) ? `${formatNumber(latest[metric])}${suffix}` : "—"}</div>` : ""}${buildLineChart(points, suffix, `Evolución de ${label}`)}`
+    : emptyHtml(hasMetric(latest?.[metric]) ? `Solo hay una medición de ${label}. Registra una más para ver tendencia.` : `Todavía no hay datos de ${label}.`);
 }

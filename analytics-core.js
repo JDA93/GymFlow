@@ -33,12 +33,28 @@ export const BODY_METRIC_LABELS = {
   sleepHours: "Sueño"
 };
 
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function hasValue(value) {
+  return value !== "" && value != null;
+}
+
+function toFiniteNumberOrNull(value) {
+  if (!hasValue(value)) return null;
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
 export function getActiveRoutine(state) {
-  return state.routines.find((item) => item.id === state.session.routineId) || null;
+  const routines = ensureArray(state?.routines);
+  const routineId = state?.session?.routineId;
+  return routines.find((item) => item.id === routineId) || null;
 }
 
 export function getUniqueWorkoutDates(state) {
-  return uniq(state.workouts.filter((item) => !item.isWarmup).map((item) => item.date)).sort().reverse();
+  return uniq(ensureArray(state?.workouts).filter((item) => !item.isWarmup).map((item) => item.date)).sort().reverse();
 }
 
 export function computeStreak(state) {
@@ -59,9 +75,11 @@ export function computeStats(state) {
   const workoutDates = getUniqueWorkoutDates(state);
   const monthPrefix = todayLocal().slice(0, 7);
   const daysTrainedThisMonth = workoutDates.filter((date) => date.startsWith(monthPrefix)).length;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0] || null;
-  const bestLift = state.workouts.reduce((best, item) => !item.isWarmup && (!best || Number(item.weight) > Number(best.weight)) ? item : best, null);
-  const bestE1rm = state.workouts
+  const measurements = ensureArray(state?.measurements);
+  const workouts = ensureArray(state?.workouts);
+  const latestMeasurement = [...measurements].sort(sortByDateDesc)[0] || null;
+  const bestLift = workouts.reduce((best, item) => !item.isWarmup && (!best || Number(item.weight) > Number(best.weight)) ? item : best, null);
+  const bestE1rm = workouts
     .filter((item) => !item.isWarmup)
     .reduce((best, item) => {
       const value = estimateE1RM(item.weight, item.reps);
@@ -69,7 +87,7 @@ export function computeStats(state) {
       return best;
     }, null);
 
-  const lastSession = [...state.sessionHistory].sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))[0] || null;
+  const lastSession = [...ensureArray(state?.sessionHistory)].sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))[0] || null;
 
   return {
     daysTrainedThisMonth,
@@ -82,7 +100,7 @@ export function computeStats(state) {
 }
 
 export function computeLastDateByRoutine(state) {
-  return state.workouts.reduce((acc, item) => {
+  return ensureArray(state?.workouts).reduce((acc, item) => {
     if (!item.routineId) return acc;
     if (!acc[item.routineId] || String(item.date).localeCompare(String(acc[item.routineId])) > 0) {
       acc[item.routineId] = item.date;
@@ -93,7 +111,7 @@ export function computeLastDateByRoutine(state) {
 
 export function getSuggestedRoutine(state) {
   const lastDateByRoutine = computeLastDateByRoutine(state);
-  const ordered = [...state.routines].sort((a, b) => {
+  const ordered = [...ensureArray(state?.routines)].sort((a, b) => {
     const dateA = lastDateByRoutine[a.id];
     const dateB = lastDateByRoutine[b.id];
     if (!dateA && !dateB) return a.name.localeCompare(b.name, "es");
@@ -138,8 +156,8 @@ export function buildRoutineMetadata(state, routine) {
 }
 
 export function buildWorkoutGroups(state, { includeWarmups = true } = {}) {
-  const routineMap = Object.fromEntries(state.routines.map((routine) => [routine.id, routine]));
-  const filtered = state.workouts.filter((item) => includeWarmups || !item.isWarmup);
+  const routineMap = Object.fromEntries(ensureArray(state?.routines).map((routine) => [routine.id, routine]));
+  const filtered = ensureArray(state?.workouts).filter((item) => includeWarmups || !item.isWarmup);
   const groups = new Map();
 
   filtered.forEach((item) => {
@@ -204,7 +222,7 @@ export function getWorkoutGroupSorter(sortBy) {
 }
 
 export function buildSessionExerciseSummaries(state, sessionId) {
-  const entries = state.workouts.filter((item) => item.sessionId === sessionId && !item.isWarmup);
+  const entries = ensureArray(state?.workouts).filter((item) => item.sessionId === sessionId && !item.isWarmup);
   const grouped = Object.values(groupBy(entries, (item) => item.exerciseId || item.exerciseKey || item.exercise));
   return grouped
     .map((logs) => ({
@@ -218,7 +236,7 @@ export function buildSessionExerciseSummaries(state, sessionId) {
 }
 
 export function buildRecentActivity(state, limit = 6) {
-  const sessions = [...state.sessionHistory]
+  const sessions = [...ensureArray(state?.sessionHistory)]
     .sort((a, b) => getChronologicalAnchor(b) - getChronologicalAnchor(a))
     .slice(0, limit)
     .map((item) => ({
@@ -256,7 +274,7 @@ export function buildRecentActivity(state, limit = 6) {
 
 export function getExerciseHistory(state, exerciseIdOrName, options = {}) {
   const { routineId = "", includeWarmups = false } = options;
-  return state.workouts
+  return ensureArray(state?.workouts)
     .filter((item) => {
       const sameExercise = (item.exerciseId && item.exerciseId === exerciseIdOrName)
         || item.exercise === exerciseIdOrName
@@ -274,15 +292,16 @@ export function getExerciseReference(state, exerciseIdOrName, routineId = "") {
 }
 
 function getRoutineFocus(state, routineExercise) {
-  const routine = state.routines.find((item) => item.id === state.session.routineId)
-    || state.routines.find((item) => (item.exercises || []).some((exercise) => exercise.id === routineExercise.id));
+  const routines = ensureArray(state?.routines);
+  const routine = routines.find((item) => item.id === state?.session?.routineId)
+    || routines.find((item) => (item.exercises || []).some((exercise) => exercise.id === routineExercise?.id));
   return routine?.focus || "";
 }
 
 export function nextLoadSuggestionForExercise(state, routineExercise) {
   if (!routineExercise) return { value: 0, decision: "start", reason: "Sin referencias previas." };
 
-  const history = getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name, { routineId: state.session.routineId || "" });
+  const history = getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name, { routineId: state?.session?.routineId || "" });
   const fallbackHistory = history.length ? history : getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name);
 
   if (!fallbackHistory.length) return { value: 0, decision: "start", reason: "Sin referencias previas." };
@@ -291,7 +310,7 @@ export function nextLoadSuggestionForExercise(state, routineExercise) {
   const repRange = parseRepRange(routineExercise.reps);
   const routineFocus = String(getRoutineFocus(state, routineExercise) || "").toLowerCase();
   const isStrength = routineFocus.includes("fuerza") || (repRange.max > 0 && repRange.max <= 6);
-  const baseIncrement = Number(state.preferences.suggestionIncrement || 2.5);
+  const baseIncrement = Number(state?.preferences?.suggestionIncrement || 2.5);
   const increment = isStrength && /sentadilla|peso muerto|prensa/i.test(routineExercise.name) ? baseIncrement * 2 : baseIncrement;
   const lastRpe = top.rpe === "" ? null : Number(top.rpe);
 
@@ -316,7 +335,7 @@ export function nextLoadSuggestionForExercise(state, routineExercise) {
 
 export function buildExerciseChartPoints(state, exerciseId, metric, aggregation = "day") {
   if (!exerciseId) return [];
-  const rows = state.workouts.filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup);
+  const rows = ensureArray(state?.workouts).filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup);
   const groups = groupBy(rows, (item) => {
     if (aggregation === "reference") {
       return item.sessionId ? `session|${item.sessionId}` : `manual|${item.id}`;
@@ -345,15 +364,16 @@ export function buildExerciseChartPoints(state, exerciseId, metric, aggregation 
 }
 
 export function buildBodyChartPoints(state, metric) {
-  return state.measurements
+  return ensureArray(state?.measurements)
     .filter((item) => item[metric] !== "" && item[metric] != null)
     .sort(sortByDateAsc)
     .slice(-12)
-    .map((item) => ({ label: shortLabel(item.date), value: Number(item[metric]) }));
+    .map((item) => ({ label: shortLabel(item.date), value: Number(item[metric]) }))
+    .filter((item) => Number.isFinite(item.value));
 }
 
 export function computeBestLiftMap(state) {
-  return state.workouts.reduce((acc, item) => {
+  return ensureArray(state?.workouts).reduce((acc, item) => {
     if (item.isWarmup) return acc;
     const key = item.exerciseId || item.exerciseKey || item.exercise;
     const value = estimateE1RM(item.weight, item.reps);
@@ -366,7 +386,7 @@ export function computeBestLiftMap(state) {
 
 export function computeFirstLiftMap(state) {
   const map = {};
-  state.workouts.forEach((item) => {
+  ensureArray(state?.workouts).forEach((item) => {
     if (item.isWarmup) return;
     const key = item.exerciseId || item.exerciseKey || item.exercise;
     const current = map[key];
@@ -390,17 +410,19 @@ export function computeGoalProgress({ baseline, current, target }) {
 
 export function buildTrendItems(state) {
   const workoutDates = getUniqueWorkoutDates(state);
+  const workouts = ensureArray(state?.workouts);
+  const measurements = [...ensureArray(state?.measurements)].sort(sortByDateDesc);
   const last7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 6).length;
   const prev7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) > 6 && daysBetween(date, todayLocal()) <= 13).length;
   const last30 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 29).length;
-  const weeklyVolume = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= 6).reduce((sum, item) => sum + calcVolume(item), 0);
-  const previousWeeklyVolume = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13).reduce((sum, item) => sum + calcVolume(item), 0);
+  const weeklyVolume = workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= 6).reduce((sum, item) => sum + calcVolume(item), 0);
+  const previousWeeklyVolume = workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13).reduce((sum, item) => sum + calcVolume(item), 0);
   const volumeDelta = weeklyVolume - previousWeeklyVolume;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0];
-  const previousMeasurement = [...state.measurements].sort(sortByDateDesc)[1];
-  const weightDelta = latestMeasurement?.bodyWeight !== "" && previousMeasurement?.bodyWeight !== ""
-    ? Number(latestMeasurement.bodyWeight || 0) - Number(previousMeasurement.bodyWeight || 0)
-    : null;
+  const latestMeasurement = measurements[0] || null;
+  const previousMeasurement = measurements[1] || null;
+  const latestWeight = toFiniteNumberOrNull(latestMeasurement?.bodyWeight);
+  const previousWeight = toFiniteNumberOrNull(previousMeasurement?.bodyWeight);
+  const weightDelta = latestWeight != null && previousWeight != null ? latestWeight - previousWeight : null;
 
   return [
     {
@@ -415,7 +437,9 @@ export function buildTrendItems(state) {
     },
     {
       title: "Peso corporal",
-      subtitle: weightDelta == null ? "Aún no hay suficiente histórico para medir tendencia." : `${latestMeasurement?.bodyWeight ? `${formatNumber(latestMeasurement.bodyWeight)} kg actual` : "Sin dato actual"}`,
+      subtitle: weightDelta == null
+        ? (latestWeight == null ? "Aún no hay suficiente histórico para medir tendencia." : `${formatNumber(latestWeight)} kg actual`)
+        : (latestWeight == null ? "Sin dato actual" : `${formatNumber(latestWeight)} kg actual`),
       chips: [{ label: weightDelta == null ? "Sin delta" : `${weightDelta > 0 ? "+" : ""}${formatNumber(weightDelta)} kg`, type: weightDelta <= 0 ? "success" : "ghost" }]
     },
     {
@@ -427,7 +451,7 @@ export function buildTrendItems(state) {
 }
 
 export function detectPotentialStall(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
   return Object.values(grouped)
     .map((logs) => {
       const recent = [...logs].sort(sortByDateAsc).slice(-5);
@@ -446,6 +470,7 @@ export function detectPotentialStall(state) {
 }
 
 export function resolveGroupEntries(state, groupId) {
+  if (!groupId) return { entryIds: [], sessionId: "" };
   if (groupId.startsWith("manual|")) {
     return { entryIds: [groupId.split("|")[1]], sessionId: "" };
   }
@@ -454,7 +479,7 @@ export function resolveGroupEntries(state, groupId) {
     const [, sessionId, exerciseId] = groupId.split("|");
     return {
       sessionId,
-      entryIds: state.workouts
+      entryIds: ensureArray(state?.workouts)
         .filter((item) => item.sessionId === sessionId && (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId)
         .map((item) => item.id)
     };
@@ -464,7 +489,11 @@ export function resolveGroupEntries(state, groupId) {
 }
 
 export function syncSessionHistoryEntry(state, sessionId) {
-  if (!sessionId) return;
+  if (!sessionId || !state) return;
+  state.workouts = ensureArray(state.workouts);
+  state.sessionHistory = ensureArray(state.sessionHistory);
+  state.routines = ensureArray(state.routines);
+
   const records = state.workouts.filter((item) => item.sessionId === sessionId);
   const existingIndex = state.sessionHistory.findIndex((item) => item.sessionId === sessionId);
 
@@ -507,22 +536,25 @@ export function syncSessionHistoryEntry(state, sessionId) {
 }
 
 export function syncAllSessionHistory(state) {
-  const sessionIds = uniq(state.workouts.filter((item) => item.sessionId).map((item) => item.sessionId).concat(state.sessionHistory.map((item) => item.sessionId)));
+  const workouts = ensureArray(state?.workouts);
+  const sessionHistory = ensureArray(state?.sessionHistory);
+  const sessionIds = uniq(workouts.filter((item) => item.sessionId).map((item) => item.sessionId).concat(sessionHistory.map((item) => item.sessionId)));
   sessionIds.forEach((sessionId) => syncSessionHistoryEntry(state, sessionId));
 }
 
 export function buildHistoryFeed(state) {
   const normalizeSearch = (value) => normalizeNameForMatch(value);
+  const ui = state?.ui || {};
   const filters = {
-    query: normalizeSearch(String(state.ui.logSearch || "")),
-    routine: state.ui.logRoutine || "all",
-    muscle: state.ui.logMuscle || "all",
-    source: state.ui.logSource || "all",
-    datePreset: state.ui.logDatePreset || "all"
+    query: normalizeSearch(String(ui.logSearch || "")),
+    routine: ui.logRoutine || "all",
+    muscle: ui.logMuscle || "all",
+    source: ui.logSource || "all",
+    datePreset: ui.logDatePreset || "all"
   };
 
-  const sessionItems = [...state.sessionHistory].map((session) => {
-    const entries = state.workouts.filter((item) => item.sessionId === session.sessionId);
+  const sessionItems = [...ensureArray(state?.sessionHistory)].map((session) => {
+    const entries = ensureArray(state?.workouts).filter((item) => item.sessionId === session.sessionId);
     const effectiveEntries = entries.filter((item) => !item.isWarmup);
     const exercises = buildSessionExerciseSummaries(state, session.sessionId);
     return {
@@ -548,7 +580,7 @@ export function buildHistoryFeed(state) {
     };
   });
 
-  const manualItems = buildWorkoutGroups(state, { includeWarmups: state.preferences.showWarmupsInLogs })
+  const manualItems = buildWorkoutGroups(state, { includeWarmups: Boolean(state?.preferences?.showWarmupsInLogs) })
     .filter((group) => !group.sessionId)
     .map((group) => ({
       kind: "manual",
@@ -585,7 +617,7 @@ export function buildHistoryFeed(state) {
       return matchesQuery && matchesRoutine && matchesMuscle && matchesSource && matchesDate;
     });
 
-  const sortBy = state.ui.logSort || "date_desc";
+  const sortBy = ui.logSort || "date_desc";
   items.sort((a, b) => {
     if (sortBy === "date_asc") {
       return getChronologicalAnchor(a) - getChronologicalAnchor(b);
@@ -605,7 +637,7 @@ export function buildHistoryFeed(state) {
 }
 
 export function buildPrItems(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
 
   return Object.values(grouped)
     .map((logs) => {
@@ -628,7 +660,7 @@ export function buildPrItems(state) {
 }
 
 export function buildMeasurementRows(state) {
-  const measurements = [...state.measurements].sort(sortByDateDesc);
+  const measurements = [...ensureArray(state?.measurements)].sort(sortByDateDesc);
   return measurements.map((item, index) => {
     const previous = measurements[index + 1] || null;
     const delta = (metric) => {
@@ -646,7 +678,7 @@ export function buildMeasurementRows(state) {
 }
 
 export function buildWeeklyVolumeSeries(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => startOfWeek(item.date));
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => startOfWeek(item.date));
   return Object.entries(grouped)
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
     .slice(-8)
@@ -662,7 +694,7 @@ export function buildWeeklyFrequencySeries(state) {
 }
 
 export function buildMonthlyVolumeSeries(state) {
-  const grouped = groupBy(state.workouts.filter((item) => !item.isWarmup), (item) => String(item.date).slice(0, 7));
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => String(item.date).slice(0, 7));
   return Object.entries(grouped)
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
     .slice(-6)
@@ -670,7 +702,7 @@ export function buildMonthlyVolumeSeries(state) {
 }
 
 export function buildMuscleDistribution(state, windowDays = 30) {
-  const recent = state.workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= windowDays - 1);
+  const recent = ensureArray(state?.workouts).filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= windowDays - 1);
   const grouped = groupBy(recent, (item) => item.muscleGroup || "Sin grupo");
   return Object.entries(grouped)
     .map(([label, logs]) => ({ label, value: logs.reduce((sum, item) => sum + calcVolume(item), 0), sets: logs.length }))
@@ -678,12 +710,15 @@ export function buildMuscleDistribution(state, windowDays = 30) {
 }
 
 export function computeAdherence(state) {
-  const habits = state.goals.habits || {};
+  const habits = state?.goals?.habits || {};
   const last7 = getUniqueWorkoutDates(state).filter((date) => daysBetween(date, todayLocal()) <= 6).length;
-  const latestMeasurement = [...state.measurements].sort(sortByDateDesc)[0] || null;
-  const previousMeasurement = [...state.measurements].sort(sortByDateDesc)[1] || null;
+  const measurements = [...ensureArray(state?.measurements)].sort(sortByDateDesc);
+  const latestMeasurement = measurements[0] || null;
+  const previousMeasurement = measurements[1] || null;
   const lastGap = latestMeasurement ? daysBetween(latestMeasurement.date, todayLocal()) : null;
-  const sleep = latestMeasurement?.sleepHours === "" || latestMeasurement?.sleepHours == null ? null : Number(latestMeasurement.sleepHours);
+  const sleep = toFiniteNumberOrNull(latestMeasurement?.sleepHours);
+  const latestWeight = toFiniteNumberOrNull(latestMeasurement?.bodyWeight);
+  const previousWeight = toFiniteNumberOrNull(previousMeasurement?.bodyWeight);
   return {
     workoutsPerWeek: {
       target: habits.workoutsPerWeek === "" ? null : Number(habits.workoutsPerWeek),
@@ -702,7 +737,7 @@ export function computeAdherence(state) {
       current: computeStreak(state)
     },
     measurementDeltaWeight: latestMeasurement && previousMeasurement && latestMeasurement.bodyWeight !== "" && previousMeasurement.bodyWeight !== ""
-      ? Number(latestMeasurement.bodyWeight) - Number(previousMeasurement.bodyWeight)
+      ? (latestWeight != null && previousWeight != null ? latestWeight - previousWeight : null)
       : null
   };
 }
