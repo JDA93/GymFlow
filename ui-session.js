@@ -91,7 +91,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
   }).join("");
   const isNext = nextExerciseId === exercise.id && !status.completed && !status.skipped;
-  const stateClass = `${status.skipped ? "skipped" : status.completed ? "completed is-completed-collapsed" : status.inProgress ? "in-progress" : ""} ${isNext ? "is-next" : ""}`.trim();
+  const stateClass = `${status.skipped ? "is-skipped" : status.completed ? "is-completed is-completed-collapsed" : status.inProgress ? "is-in-progress" : "is-pending"} ${isNext ? "is-now" : ""}`.trim();
   const shouldExpand = nextExerciseId === exercise.id || status.inProgress || (entries.length && !status.completed);
   const summary = `
     <summary class="session-exercise-summary">
@@ -102,9 +102,9 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
   const safeExerciseId = escapeHtml(exercise.id);
 
   return `
-    <details class="session-exercise ${stateClass}" id="exercise-card-${safeExerciseId}" ${shouldExpand ? "open" : ""}>
+    <details class="session-exercise-card session-exercise ${stateClass}" id="exercise-card-${safeExerciseId}" ${shouldExpand ? "open" : ""}>
       ${summary}
-      <div class="session-exercise-body">
+      <div class="session-exercise-body session-card-body">
       <div class="session-exercise-top">
         <div>
           <div class="exercise-title-row">

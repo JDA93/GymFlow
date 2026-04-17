@@ -2,10 +2,19 @@ import { buildHistoryFeed, buildMeasurementRows, buildPrItems, buildRoutineMetad
 import { cardHtml, emptyHtml } from "./ui-common.js";
 import { escapeHtml, formatCompactDelta, formatDate, formatDuration, formatNumber } from "./utils.js";
 
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function hasValue(value) {
+  return value !== "" && value != null;
+}
+
 export function renderRoutines(state, els) {
-  const search = String(state.ui.routineSearch || "").trim().toLowerCase();
-  const dayFilter = state.ui.routineDayFilter || "all";
-  const routines = state.routines.filter((routine) => {
+  const search = String(state?.ui?.routineSearch || "").trim().toLowerCase();
+  const dayFilter = state?.ui?.routineDayFilter || "all";
+  const allRoutines = ensureArray(state?.routines);
+  const routines = allRoutines.filter((routine) => {
     const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
     if (!dayMatches) return false;
     if (!search) return true;
@@ -23,7 +32,7 @@ export function renderRoutines(state, els) {
   }
 
   if (!routines.length) {
-    els.routineList.innerHTML = emptyHtml(state.routines.length ? "No hay rutinas que coincidan con los filtros." : "No hay rutinas todavía.");
+    els.routineList.innerHTML = emptyHtml(allRoutines.length ? "No hay rutinas que coincidan con los filtros." : "Aún no hay rutinas. Crea una o usa una plantilla.");
     return;
   }
 
@@ -87,17 +96,19 @@ export function renderWorkoutList(state, els) {
 function renderHistoryFilterSummary(state, els, total) {
   if (!els.logFilterSummary) return;
   const active = [];
-  if (state.ui.logSearch) active.push(`texto "${state.ui.logSearch}"`);
-  if (state.ui.logRoutine && state.ui.logRoutine !== "all") active.push("rutina");
-  if (state.ui.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
-  if (state.ui.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
-  if (state.ui.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
+  if (state?.ui?.logSearch) active.push(`texto "${state.ui.logSearch}"`);
+  if (state?.ui?.logRoutine && state.ui.logRoutine !== "all") active.push("rutina");
+  if (state?.ui?.logSource && state.ui.logSource !== "all") active.push(`origen: ${state.ui.logSource}`);
+  if (state?.ui?.logMuscle && state.ui.logMuscle !== "all") active.push(`grupo: ${state.ui.logMuscle}`);
+  if (state?.ui?.logDatePreset && state.ui.logDatePreset !== "all") active.push(`ventana: ${state.ui.logDatePreset}`);
   els.logFilterSummary.textContent = active.length
     ? `${total} resultados · filtros activos: ${active.join(" · ")}.`
     : `${total} resultados · vista completa.`;
 }
 
 function renderSessionHistoryCard(item) {
+  const muscleGroups = ensureArray(item?.muscleGroups);
+  const exercises = ensureArray(item?.exercises);
   return `
     <article class="list-item history-card history-card--session">
       <div class="list-head">
@@ -105,17 +116,17 @@ function renderSessionHistoryCard(item) {
           <h3 class="list-title">${escapeHtml(item.title)}</h3>
           <p class="list-subtitle">Sesión completa · ${item.exercisesCompleted} ejercicios · ${formatDuration(item.durationSeconds || 0)}</p>
         </div>
-        <span class="chip success">${formatNumber(item.volume)} kg</span>
+        <span class="chip success">${formatNumber(item.volume || 0)} kg</span>
       </div>
       <div class="chip-row">
         <span class="chip ghost">${item.workingSets ?? item.totalSets} efectivas</span>
         <span class="chip ghost">${item.warmupSets ?? 0} warm-up</span>
         <span class="chip ghost">${item.exercisesCompleted ?? 0} ejercicios</span>
-        ${item.muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${escapeHtml(group)}</span>`).join("")}
+        ${muscleGroups.slice(0, 3).map((group) => `<span class="chip ghost">${escapeHtml(group)}</span>`).join("")}
       </div>
       ${item.notes ? `<p class="helper-line history-note-line">📝 ${escapeHtml(item.notes)}</p>` : ""}
       <div class="history-session-exercises">
-        ${item.exercises.slice(0, 4).map((exercise) => `
+        ${exercises.slice(0, 4).map((exercise) => `
           <div class="history-mini-row">
             <strong>${escapeHtml(exercise.exercise)}</strong>
             <span>${exercise.setCount} series · ${formatNumber(exercise.maxWeight)} kg top</span>
@@ -159,16 +170,16 @@ function renderManualHistoryCard(item) {
 export function renderPrList(state, els) {
   const items = buildPrItems(state);
   if (!items.length) {
-    els.prList.innerHTML = emptyHtml("Sin datos todavía.");
+    els.prList.innerHTML = emptyHtml("Aún no hay PRs para mostrar. Guarda más entrenos para comparar progresos.");
     return;
   }
 
   els.prList.innerHTML = items.map((item) => cardHtml({
     title: item.exercise,
-    subtitle: `Carga ${formatNumber(item.bestWeight.weight)} kg · e1RM ${formatNumber(item.bestE1rm.weight * (1 + item.bestE1rm.reps / 30))} kg`,
+    subtitle: `Carga ${formatNumber(item.bestWeight?.weight || 0)} kg · e1RM ${formatNumber((item.bestE1rm?.weight || 0) * (1 + (item.bestE1rm?.reps || 0) / 30))} kg`,
     chips: [
-      { label: `Último ${formatDate(item.latest.date)}`, type: "ghost" },
-      { label: `PR reciente ${formatDate(item.bestE1rm.date)}`, type: "ghost" },
+      { label: `Último ${item.latest?.date ? formatDate(item.latest.date) : "s/d"}`, type: "ghost" },
+      { label: `PR reciente ${item.bestE1rm?.date ? formatDate(item.bestE1rm.date) : "s/d"}`, type: "ghost" },
       { label: `${item.deltaVsPrevBest >= 0 ? "+" : ""}${formatNumber(item.deltaVsPrevBest)} kg vs PR anterior`, type: item.deltaVsPrevBest >= 0 ? "success" : "warning" }
     ]
   })).join("");
@@ -186,23 +197,23 @@ export function renderMeasurements(state, els) {
       <div class="list-head">
         <div>
           <h3 class="list-title">${formatDate(item.date)}</h3>
-          <p class="list-subtitle">Peso ${item.bodyWeight !== "" && item.bodyWeight != null ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Cintura ${item.waist !== "" && item.waist != null ? `${formatNumber(item.waist)} cm` : "—"}</p>
+          <p class="list-subtitle">Peso ${hasValue(item.bodyWeight) ? `${formatNumber(item.bodyWeight)} kg` : "—"} · Cintura ${hasValue(item.waist) ? `${formatNumber(item.waist)} cm` : "—"}</p>
         </div>
-        <span class="chip ghost">Sueño ${item.sleepHours !== "" && item.sleepHours != null ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
+        <span class="chip ghost">Sueño ${hasValue(item.sleepHours) ? `${formatNumber(item.sleepHours)} h` : "—"}</span>
       </div>
       <div class="chip-row">
         <span class="chip ${item.deltaBodyWeight == null ? "ghost" : item.deltaBodyWeight <= 0 ? "success" : "warning"}">Peso ${item.deltaBodyWeight == null ? "—" : `${item.deltaBodyWeight < 0 ? "↘ " : item.deltaBodyWeight > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyWeight, " kg")}`}</span>
         <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">Cintura ${item.deltaWaist == null ? "—" : `${item.deltaWaist < 0 ? "↘ " : item.deltaWaist > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaWaist, " cm")}`}</span>
         <span class="chip ${item.deltaBodyFat == null ? "ghost" : item.deltaBodyFat <= 0 ? "success" : "warning"}">Grasa ${item.deltaBodyFat == null ? "—" : `${item.deltaBodyFat < 0 ? "↘ " : item.deltaBodyFat > 0 ? "↗ " : "→ "}${formatCompactDelta(item.deltaBodyFat, " %")}`}</span>
         <span class="chip ${item.deltaWaist == null ? "ghost" : item.deltaWaist <= 0 ? "success" : "warning"}">${trendLabel(item.deltaWaist)}</span>
-        <span class="chip ghost">Pecho ${item.chest !== "" && item.chest != null ? `${formatNumber(item.chest)} cm` : "—"}</span>
-        <span class="chip ghost">Brazo ${item.arm !== "" && item.arm != null ? `${formatNumber(item.arm)} cm` : "—"}</span>
-        <span class="chip ghost">Pierna ${item.thigh !== "" && item.thigh != null ? `${formatNumber(item.thigh)} cm` : "—"}</span>
+        <span class="chip ghost">Pecho ${hasValue(item.chest) ? `${formatNumber(item.chest)} cm` : "—"}</span>
+        <span class="chip ghost">Brazo ${hasValue(item.arm) ? `${formatNumber(item.arm)} cm` : "—"}</span>
+        <span class="chip ghost">Pierna ${hasValue(item.thigh) ? `${formatNumber(item.thigh)} cm` : "—"}</span>
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="edit-measurement" data-id="${escapeHtml(item.id)}">Editar</button>
         <button class="ghost small" data-action="delete-measurement" data-id="${escapeHtml(item.id)}">Borrar</button>
       </div>
     </article>
-  `).join("") : emptyHtml("Todavía no hay mediciones.");
+  `).join("") : emptyHtml("Todavía no hay mediciones. Añade una para empezar a ver cambios.");
 }

@@ -138,6 +138,18 @@ let routineSelectsKey = "";
 let muscleFilterKey = "";
 let routineDayFilterKey = "";
 
+function resolveNumberPreserveZero(value, fallback, { min = null } = {}) {
+  const raw = typeof value === "string" ? value.trim() : value;
+  let parsed = raw === "" || raw == null ? null : Number(raw);
+  if (!Number.isFinite(parsed)) parsed = null;
+  if (parsed != null && min != null) parsed = Math.max(min, parsed);
+  if (parsed != null) return parsed;
+
+  const fallbackParsed = Number(fallback);
+  if (!Number.isFinite(fallbackParsed)) return min != null ? min : 0;
+  return min != null ? Math.max(min, fallbackParsed) : fallbackParsed;
+}
+
 function safeShowDialog(dialogEl) {
   if (!dialogEl) return;
   if (typeof dialogEl.showModal === "function") {
@@ -735,7 +747,19 @@ function startRoutineById(routineId) {
     store.queueSave();
     setActiveTab(store.state, "session");
     requestWakeLock();
-    refreshWorkoutDependentAreas();
+    try {
+      refreshWorkoutDependentAreas();
+    } catch (error) {
+      console.error(error);
+      try {
+        populateRoutineSelects();
+        renderSessionArea({ syncSelects: false });
+        renderDashboardArea();
+      } catch (fallbackError) {
+        console.error(fallbackError);
+      }
+      toast(els, "La sesión se inició, pero hubo un problema al refrescar la pantalla.");
+    }
   }
   if (result.status === "existing") {
     setActiveTab(store.state, "session");
@@ -821,7 +845,11 @@ function handleAddSessionSet(exerciseId) {
     weight: Number(weightInput?.value),
     reps: Number(repsInput?.value),
     rpe: rpeInput?.value || "",
-    rest: Number(restInput?.value || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+    rest: resolveNumberPreserveZero(
+      restInput?.value,
+      store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS,
+      { min: 0 }
+    ),
     isWarmup: warmupInput?.checked || false
   });
   if (!result.ok) {
@@ -1093,7 +1121,11 @@ function saveRoutineFromForm(event) {
       name: row.querySelector('[data-field="name"]').value.trim(),
       sets: Number(row.querySelector('[data-field="sets"]').value || 0),
       reps: row.querySelector('[data-field="reps"]').value.trim(),
-      rest: Number(row.querySelector('[data-field="rest"]').value || store.state.preferences.defaultRestSeconds || FALLBACK_REST_SECONDS),
+      rest: resolveNumberPreserveZero(
+        row.querySelector('[data-field="rest"]').value,
+        store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS,
+        { min: 0 }
+      ),
       block: row.querySelector('[data-field="block"]').value.trim(),
       notes: row.querySelector('[data-field="notes"]').value.trim()
     }))
@@ -1524,8 +1556,16 @@ function saveGoals(event) {
 function savePreferences(event) {
   event.preventDefault();
   store.state.preferences.units = 'metric';
-  store.state.preferences.defaultRestSeconds = Number(els.preferencesForm.defaultRestSeconds.value || FALLBACK_REST_SECONDS);
-  store.state.preferences.suggestionIncrement = Number(els.preferencesForm.suggestionIncrement.value || 2.5);
+  store.state.preferences.defaultRestSeconds = resolveNumberPreserveZero(
+    els.preferencesForm.defaultRestSeconds.value,
+    FALLBACK_REST_SECONDS,
+    { min: 0 }
+  );
+  store.state.preferences.suggestionIncrement = resolveNumberPreserveZero(
+    els.preferencesForm.suggestionIncrement.value,
+    2.5,
+    { min: 0 }
+  );
   store.state.preferences.autoStartRest = els.preferencesForm.autoStartRest.checked;
   store.state.preferences.keepScreenAwake = els.preferencesForm.keepScreenAwake.checked;
   store.state.preferences.showWarmupsInLogs = els.preferencesForm.showWarmupsInLogs.checked;
@@ -1568,6 +1608,41 @@ function releaseWakeLock() {
 function prepareForFullStateReplacement() {
   releaseWakeLock();
   stopRestTimer();
+}
+
+function commitFullStateReplacement(nextState, { successMessage }) {
+  const previousState = safeClone(store.state);
+  try {
+    prepareForFullStateReplacement();
+    store.state = migrateState(nextState);
+    ensureMinimumData();
+    syncAllSessionHistory(store.state);
+    selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
+    cancelRoutineEdit();
+    cancelWorkoutEdit();
+    cancelMeasurementEdit();
+    refreshAll();
+    store.queueSave();
+    if (successMessage) toast(els, successMessage);
+    return true;
+  } catch (error) {
+    console.error(error);
+    try {
+      store.state = migrateState(previousState);
+      ensureMinimumData();
+      syncAllSessionHistory(store.state);
+      selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
+      cancelRoutineEdit();
+      cancelWorkoutEdit();
+      cancelMeasurementEdit();
+      refreshAll();
+      store.queueSave();
+    } catch (rollbackError) {
+      console.error(rollbackError);
+    }
+    toast(els, "No se pudo completar la operación. Se restauró el estado anterior.");
+    return false;
+  }
 }
 
 function syncToastOffsetFromBottomNav() {
@@ -1703,16 +1778,7 @@ async function loadDemoData() {
     resultGoals: { bodyWeight: 79, waist: 80, bodyFat: 12, bench: 100, squat: 140, deadlift: 160 },
     habits: { workoutsPerWeek: 4, sleepHours: 7.5, measureEveryDays: 14, minimumStreakDays: 3 }
   };
-  prepareForFullStateReplacement();
-  store.state = newState;
-  ensureMinimumData();
-  syncAllSessionHistory(store.state);
-  cancelRoutineEdit();
-  cancelWorkoutEdit();
-  cancelMeasurementEdit();
-  refreshAll();
-  store.queueSave();
-  toast(els, 'Demo cargada.');
+  commitFullStateReplacement(newState, { successMessage: "Demo cargada." });
 }
 
 function workoutDemo(date, routineId, sessionId, exercise, weight, sets, reps, source = 'session') {
@@ -1745,15 +1811,7 @@ function measurementDemo(date, bodyWeight, bodyFat, waist, chest, arm, thigh, hi
 async function resetAllData() {
   if (!await confirmSafeStateReplacement("Resetear todos los datos")) return;
   if (!window.confirm('¿Seguro que quieres borrar todos los datos?')) return;
-  prepareForFullStateReplacement();
-  store.state = defaultState();
-  ensureMinimumData();
-  cancelRoutineEdit();
-  cancelWorkoutEdit();
-  cancelMeasurementEdit();
-  refreshAll();
-  store.queueSave();
-  toast(els, 'Datos reiniciados.');
+  commitFullStateReplacement(defaultState(), { successMessage: "Datos reiniciados." });
 }
 
 function exportJson() {
@@ -1780,16 +1838,11 @@ async function importJson(event) {
   const reader = new FileReader();
   reader.onload = async () => {
     try {
-      prepareForFullStateReplacement();
-      store.state = migrateState(JSON.parse(String(reader.result)));
-      ensureMinimumData();
-      syncAllSessionHistory(store.state);
-      cancelRoutineEdit();
-      cancelWorkoutEdit();
-      cancelMeasurementEdit();
-      refreshAll();
+      const importedState = migrateState(JSON.parse(String(reader.result)));
+      const applied = commitFullStateReplacement(importedState, { successMessage: "" });
+      if (!applied) return;
       await store.flushSave();
-      toast(els, 'Datos importados.');
+      toast(els, "Datos importados.");
     } catch (error) {
       console.error(error);
       toast(els, 'El archivo no es válido.');
