@@ -244,6 +244,7 @@ export function migrateState(rawState) {
     sessionId: item.sessionId || "",
     exercise: String(item.exercise || item.exerciseName || "").trim(),
     weight: safeNumber(item.weight, 0),
+    loadMode: item.loadMode === "bodyweight" ? "bodyweight" : "kg",
     sets: item.sessionId ? 1 : Math.max(1, safeNumber(item.sets, 1)),
     reps: Math.max(1, safeNumber(item.reps, 1)),
     rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
@@ -322,7 +323,15 @@ export function migrateState(rawState) {
     skippedExerciseIds: Array.isArray(base.session?.skippedExerciseIds) ? [...new Set(base.session.skippedExerciseIds)] : [],
     currentExerciseId: base.session?.currentExerciseId || "",
     notes: String(base.session?.notes || ""),
-    lastDeletedSet: base.session?.lastDeletedSet || null,
+    lastDeletedSet: base.session?.lastDeletedSet
+      ? normalizeWorkoutRecord({
+        ...base.session.lastDeletedSet,
+        loadMode: base.session.lastDeletedSet.loadMode === "bodyweight" ? "bodyweight" : "kg",
+        weight: safeNumber(base.session.lastDeletedSet.weight, 0),
+        reps: Math.max(1, safeNumber(base.session.lastDeletedSet.reps, 1)),
+        source: "session"
+      })
+      : null,
     restTimerEndsAt: base.session?.restTimerEndsAt || "",
     setEntries: Array.isArray(base.session?.setEntries)
       ? base.session.setEntries.map((entry) => normalizeWorkoutRecord({
@@ -334,6 +343,7 @@ export function migrateState(rawState) {
         muscleGroup: entry.muscleGroup || "",
         movementPattern: entry.movementPattern || "",
         weight: safeNumber(entry.weight, 0),
+        loadMode: entry.loadMode === "bodyweight" ? "bodyweight" : "kg",
         reps: Math.max(1, safeNumber(entry.reps, 1)),
         rpe: optionalNumber(entry.rpe, { min: 1, max: 10 }),
         rest: optionalNumber(entry.rest, { min: 0 }),
@@ -358,6 +368,7 @@ export function migrateState(rawState) {
         rpe: entry.rpe,
         rest: entry.rest,
         isWarmup: entry.isWarmup,
+        loadMode: entry.loadMode === "bodyweight" ? "bodyweight" : "kg",
         createdAt: entry.createdAt,
         notes: entry.notes || ""
       }))

@@ -47,6 +47,14 @@ function toFiniteNumberOrNull(value) {
   return Number.isFinite(num) ? num : null;
 }
 
+function isExternalLoadRecord(item) {
+  return item?.loadMode !== "bodyweight";
+}
+
+function filterExternalLoadRecords(items) {
+  return ensureArray(items).filter((item) => isExternalLoadRecord(item));
+}
+
 export function getActiveRoutine(state) {
   const routines = ensureArray(state?.routines);
   const routineId = state?.session?.routineId;
@@ -78,9 +86,9 @@ export function computeStats(state) {
   const measurements = ensureArray(state?.measurements);
   const workouts = ensureArray(state?.workouts);
   const latestMeasurement = [...measurements].sort(sortByDateDesc)[0] || null;
-  const bestLift = workouts.reduce((best, item) => !item.isWarmup && (!best || Number(item.weight) > Number(best.weight)) ? item : best, null);
+  const bestLift = workouts.reduce((best, item) => !item.isWarmup && isExternalLoadRecord(item) && (!best || Number(item.weight) > Number(best.weight)) ? item : best, null);
   const bestE1rm = workouts
-    .filter((item) => !item.isWarmup)
+    .filter((item) => !item.isWarmup && isExternalLoadRecord(item))
     .reduce((best, item) => {
       const value = estimateE1RM(item.weight, item.reps);
       if (!best || value > best.value) return { value, item };
@@ -192,9 +200,9 @@ export function buildWorkoutGroups(state, { includeWarmups = true } = {}) {
     group.entries.push(item);
     group.setCount += Number(item.sets || 1);
     group.repsList.push(Number(item.reps || 0));
-    group.maxWeight = Math.max(group.maxWeight, Number(item.weight || 0));
+    group.maxWeight = Math.max(group.maxWeight, isExternalLoadRecord(item) ? Number(item.weight || 0) : 0);
     group.volume += calcVolume(item);
-    group.bestE1rm = Math.max(group.bestE1rm, estimateE1RM(item.weight, item.reps));
+    group.bestE1rm = Math.max(group.bestE1rm, isExternalLoadRecord(item) ? estimateE1RM(item.weight, item.reps) : 0);
     group.containsWarmup = group.containsWarmup || item.isWarmup;
     if (String(item.createdAt || "") > String(group.latestCreatedAt || "")) group.latestCreatedAt = item.createdAt;
   });
@@ -225,13 +233,16 @@ export function buildSessionExerciseSummaries(state, sessionId) {
   const entries = ensureArray(state?.workouts).filter((item) => item.sessionId === sessionId && !item.isWarmup);
   const grouped = Object.values(groupBy(entries, (item) => item.exerciseId || item.exerciseKey || item.exercise));
   return grouped
-    .map((logs) => ({
+    .map((logs) => {
+      const external = filterExternalLoadRecords(logs);
+      return ({
       exercise: logs[0].exercise,
       setCount: logs.length,
-      maxWeight: Math.max(...logs.map((item) => Number(item.weight || 0))),
+      maxWeight: external.length ? Math.max(...external.map((item) => Number(item.weight || 0))) : 0,
       repsTop: logs.reduce((best, item) => Number(item.reps || 0) > Number(best.reps || 0) ? item : best, logs[0]).reps,
       muscleGroup: logs[0].muscleGroup || ""
-    }))
+      });
+    })
     .sort((a, b) => b.maxWeight - a.maxWeight || a.exercise.localeCompare(b.exercise, "es"));
 }
 
@@ -299,14 +310,16 @@ function getRoutineFocus(state, routineExercise) {
 }
 
 export function nextLoadSuggestionForExercise(state, routineExercise) {
-  if (!routineExercise) return { value: 0, decision: "start", reason: "Sin referencias previas." };
+  if (!routineExercise) return { value: 0, decision: "start", reason: "Sin referencias previas.", hasExternalReference: false };
 
   const history = getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name, { routineId: state?.session?.routineId || "" });
   const fallbackHistory = history.length ? history : getExerciseHistory(state, routineExercise.catalogId || routineExercise.exerciseKey || routineExercise.name);
 
-  if (!fallbackHistory.length) return { value: 0, decision: "start", reason: "Sin referencias previas." };
+  if (!fallbackHistory.length) return { value: 0, decision: "start", reason: "Sin referencias previas.", hasExternalReference: false };
+  const externalHistory = filterExternalLoadRecords(fallbackHistory);
+  if (!externalHistory.length) return { value: 0, decision: "hold", reason: "Sin referencia de carga externa.", hasExternalReference: false };
 
-  const top = fallbackHistory[0];
+  const top = externalHistory[0];
   const repRange = parseRepRange(routineExercise.reps);
   const routineFocus = String(getRoutineFocus(state, routineExercise) || "").toLowerCase();
   const isStrength = routineFocus.includes("fuerza") || (repRange.max > 0 && repRange.max <= 6);
@@ -315,27 +328,28 @@ export function nextLoadSuggestionForExercise(state, routineExercise) {
   const lastRpe = top.rpe === "" ? null : Number(top.rpe);
 
   if (lastRpe != null && lastRpe >= 9.5 && repRange.min && Number(top.reps || 0) < repRange.min) {
-    return { value: Math.max(0, Number(top.weight || 0) - increment), decision: "down", reason: "Última referencia demasiado exigente para el rango objetivo." };
+    return { value: Math.max(0, Number(top.weight || 0) - increment), decision: "down", reason: "Última referencia demasiado exigente para el rango objetivo.", hasExternalReference: true };
   }
 
   if (repRange.max && Number(top.reps || 0) >= repRange.max && (lastRpe == null || lastRpe <= 8.5)) {
-    return { value: Number(top.weight || 0) + increment, decision: "up", reason: "Cumpliste el techo del rango con margen razonable." };
+    return { value: Number(top.weight || 0) + increment, decision: "up", reason: "Cumpliste el techo del rango con margen razonable.", hasExternalReference: true };
   }
 
   if (repRange.min && Number(top.reps || 0) < repRange.min) {
-    return { value: Number(top.weight || 0), decision: "hold", reason: "Mantén la carga hasta entrar estable en el rango objetivo." };
+    return { value: Number(top.weight || 0), decision: "hold", reason: "Mantén la carga hasta entrar estable en el rango objetivo.", hasExternalReference: true };
   }
 
   return {
     value: Number(top.weight || 0),
     decision: "hold",
-    reason: lastRpe != null && lastRpe >= 9 ? "Mantén. El esfuerzo ya fue alto." : "Mantén y acumula repeticiones limpias antes de subir."
+    reason: lastRpe != null && lastRpe >= 9 ? "Mantén. El esfuerzo ya fue alto." : "Mantén y acumula repeticiones limpias antes de subir.",
+    hasExternalReference: true
   };
 }
 
 export function buildExerciseChartPoints(state, exerciseId, metric, aggregation = "day") {
   if (!exerciseId) return [];
-  const rows = ensureArray(state?.workouts).filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup);
+  const rows = ensureArray(state?.workouts).filter((item) => (item.exerciseId || item.exerciseKey || item.exercise) === exerciseId && !item.isWarmup && isExternalLoadRecord(item));
   const groups = groupBy(rows, (item) => {
     if (aggregation === "reference") {
       return item.sessionId ? `session|${item.sessionId}` : `manual|${item.id}`;
@@ -374,7 +388,7 @@ export function buildBodyChartPoints(state, metric) {
 
 export function computeBestLiftMap(state) {
   return ensureArray(state?.workouts).reduce((acc, item) => {
-    if (item.isWarmup) return acc;
+    if (item.isWarmup || !isExternalLoadRecord(item)) return acc;
     const key = item.exerciseId || item.exerciseKey || item.exercise;
     const value = estimateE1RM(item.weight, item.reps);
     if (!acc[key] || value > acc[key].e1rm) {
@@ -387,7 +401,7 @@ export function computeBestLiftMap(state) {
 export function computeFirstLiftMap(state) {
   const map = {};
   ensureArray(state?.workouts).forEach((item) => {
-    if (item.isWarmup) return;
+    if (item.isWarmup || !isExternalLoadRecord(item)) return;
     const key = item.exerciseId || item.exerciseKey || item.exercise;
     const current = map[key];
     if (!current || String(item.date).localeCompare(String(current.date)) < 0) {
@@ -415,8 +429,8 @@ export function buildTrendItems(state) {
   const last7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 6).length;
   const prev7 = workoutDates.filter((date) => daysBetween(date, todayLocal()) > 6 && daysBetween(date, todayLocal()) <= 13).length;
   const last30 = workoutDates.filter((date) => daysBetween(date, todayLocal()) <= 29).length;
-  const weeklyVolume = workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= 6).reduce((sum, item) => sum + calcVolume(item), 0);
-  const previousWeeklyVolume = workouts.filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13).reduce((sum, item) => sum + calcVolume(item), 0);
+  const weeklyVolume = workouts.filter((item) => !item.isWarmup && isExternalLoadRecord(item) && daysBetween(item.date, todayLocal()) <= 6).reduce((sum, item) => sum + calcVolume(item), 0);
+  const previousWeeklyVolume = workouts.filter((item) => !item.isWarmup && isExternalLoadRecord(item) && daysBetween(item.date, todayLocal()) > 6 && daysBetween(item.date, todayLocal()) <= 13).reduce((sum, item) => sum + calcVolume(item), 0);
   const volumeDelta = weeklyVolume - previousWeeklyVolume;
   const latestMeasurement = measurements[0] || null;
   const previousMeasurement = measurements[1] || null;
@@ -451,7 +465,7 @@ export function buildTrendItems(state) {
 }
 
 export function detectPotentialStall(state) {
-  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup && isExternalLoadRecord(item)), (item) => item.exerciseId || item.exerciseKey || item.exercise);
   return Object.values(grouped)
     .map((logs) => {
       const recent = [...logs].sort(sortByDateAsc).slice(-5);
@@ -637,7 +651,7 @@ export function buildHistoryFeed(state) {
 }
 
 export function buildPrItems(state) {
-  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => item.exerciseId || item.exerciseKey || item.exercise);
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup && isExternalLoadRecord(item)), (item) => item.exerciseId || item.exerciseKey || item.exercise);
 
   return Object.values(grouped)
     .map((logs) => {
@@ -678,7 +692,7 @@ export function buildMeasurementRows(state) {
 }
 
 export function buildWeeklyVolumeSeries(state) {
-  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => startOfWeek(item.date));
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup && isExternalLoadRecord(item)), (item) => startOfWeek(item.date));
   return Object.entries(grouped)
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
     .slice(-8)
@@ -694,7 +708,7 @@ export function buildWeeklyFrequencySeries(state) {
 }
 
 export function buildMonthlyVolumeSeries(state) {
-  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup), (item) => String(item.date).slice(0, 7));
+  const grouped = groupBy(ensureArray(state?.workouts).filter((item) => !item.isWarmup && isExternalLoadRecord(item)), (item) => String(item.date).slice(0, 7));
   return Object.entries(grouped)
     .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
     .slice(-6)
@@ -702,7 +716,7 @@ export function buildMonthlyVolumeSeries(state) {
 }
 
 export function buildMuscleDistribution(state, windowDays = 30) {
-  const recent = ensureArray(state?.workouts).filter((item) => !item.isWarmup && daysBetween(item.date, todayLocal()) <= windowDays - 1);
+  const recent = ensureArray(state?.workouts).filter((item) => !item.isWarmup && isExternalLoadRecord(item) && daysBetween(item.date, todayLocal()) <= windowDays - 1);
   const grouped = groupBy(recent, (item) => item.muscleGroup || "Sin grupo");
   return Object.entries(grouped)
     .map(([label, logs]) => ({ label, value: logs.reduce((sum, item) => sum + calcVolume(item), 0), sets: logs.length }))

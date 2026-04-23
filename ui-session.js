@@ -3,6 +3,10 @@ import { emptyHtml } from "./ui-common.js";
 import { escapeHtml, extractMainRep, formatDuration, formatNumber, parseRepRange } from "./utils.js";
 import { getExerciseCompletionStatus, getSessionDurationSeconds, getSessionEntriesByExercise, getNextSuggestedExerciseId, isExerciseSkipped } from "./session.js";
 
+function loadLabel(entry) {
+  return entry?.loadMode === "bodyweight" ? "Peso corporal" : `${formatNumber(entry?.weight || 0)} kg`;
+}
+
 export function renderSession(state, els) {
   const routine = getActiveRoutine(state);
   const active = state.session.active && routine;
@@ -61,7 +65,7 @@ export function renderSession(state, els) {
       <div>
         <p class="eyebrow-dark">Ahora</p>
         <strong>${escapeHtml(currentExercise?.name || "Sin foco")}</strong>
-        <p class="helper-line">Siguiente sugerencia: ${currentSuggestion ? `${formatNumber(currentSuggestion.value)} kg` : "—"} · ${pendingCount} pendientes</p>
+        <p class="helper-line">Siguiente sugerencia: ${currentSuggestion?.hasExternalReference ? `${formatNumber(currentSuggestion.value)} kg` : "Sin referencia de carga externa"} · ${pendingCount} pendientes</p>
       </div>
       <div class="actions-row">
         <button class="ghost small" data-action="focus-current-exercise" data-id="${escapeHtml(nextExerciseId || "")}">Ir al ejercicio</button>
@@ -86,6 +90,7 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
   const suggestedWeight = latestEntry ? latestEntry.weight : (reference?.weight ?? suggestion.value ?? 0);
   const suggestedReps = latestEntry ? latestEntry.reps : extractMainRep(exercise.reps);
   const suggestedRest = latestEntry?.rest ?? restDefault;
+  const suggestedLoadMode = latestEntry?.loadMode || reference?.loadMode || "kg";
   const plannedSets = Array.from({ length: Number(exercise.sets || 0) }, (_, setIndex) => {
     const done = status.workingEntries.length > setIndex;
     return `<span class="planned-set ${done ? "done" : ""}">Serie ${setIndex + 1}</span>`;
@@ -123,8 +128,8 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
       </div>
 
       <div class="chip-row">
-        <span class="chip ghost">Último top set: ${reference ? `${formatNumber(reference.weight)} kg × ${reference.reps}` : "—"}</span>
-        <span class="chip ${suggestion.decision === "up" ? "success" : suggestion.decision === "down" ? "warning" : "ghost"}">Siguiente carga: ${formatNumber(suggestion.value)} kg</span>
+        <span class="chip ghost">Última referencia: ${reference ? `${loadLabel(reference)} × ${reference.reps}` : "—"}</span>
+        <span class="chip ${suggestion.decision === "up" ? "success" : suggestion.decision === "down" ? "warning" : "ghost"}">Siguiente carga: ${suggestion.hasExternalReference ? `${formatNumber(suggestion.value)} kg` : "Sin referencia de carga externa"}</span>
         <span class="chip ghost">Rango objetivo: ${repRange.max ? `${repRange.min}-${repRange.max}` : repRange.min || "—"}</span>
         <span class="chip ${status.skipped ? "warning" : status.completed ? "success" : nextExerciseId === exercise.id ? "success" : "ghost"}">${status.skipped ? "Omitido" : status.completed ? "Completado automático" : nextExerciseId === exercise.id ? "Ahora toca" : `${status.workingEntries.length} guardadas`}</span>
       </div>
@@ -136,7 +141,14 @@ function renderExerciseCard(state, exercise, index, nextExerciseId) {
       <div class="session-series-grid">
         <div class="quick-input-group">
           <label for="session-weight-${safeExerciseId}">Kg</label>
-          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${safeExerciseId}" value="${suggestedWeight}" />
+          <input inputmode="decimal" type="number" step="0.5" min="0" placeholder="Kg" id="session-weight-${safeExerciseId}" value="${suggestedWeight}" ${suggestedLoadMode === "bodyweight" ? "disabled" : ""} />
+        </div>
+        <div class="quick-input-group quick-input-group--mode">
+          <label>Modo de carga</label>
+          <div class="segmented-control">
+            <label><input type="radio" name="session-load-mode-${safeExerciseId}" value="kg" ${suggestedLoadMode === "kg" ? "checked" : ""} />Kg</label>
+            <label><input type="radio" name="session-load-mode-${safeExerciseId}" value="bodyweight" ${suggestedLoadMode === "bodyweight" ? "checked" : ""} />Peso corporal</label>
+          </div>
         </div>
         <div class="quick-input-group">
           <label for="session-reps-${safeExerciseId}">Reps</label>
@@ -189,7 +201,7 @@ function buildSessionTable(entries) {
             <tr>
               <td>${index + 1}</td>
               <td>${entry.isWarmup ? "Calentamiento" : "Efectiva"}</td>
-              <td>${formatNumber(entry.weight)} kg</td>
+              <td>${loadLabel(entry)}</td>
               <td>${entry.reps}</td>
               <td>${entry.rpe === "" ? "—" : entry.rpe}</td>
               <td>${entry.rest ?? "—"}s</td>

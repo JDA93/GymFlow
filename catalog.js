@@ -54,6 +54,7 @@ export function getExerciseMeta(rawName) {
 
 export function normalizeWorkoutRecord(raw) {
   const meta = getExerciseMeta(raw.exercise || raw.exerciseName || raw.name || "");
+  const loadMode = raw.loadMode === "bodyweight" ? "bodyweight" : "kg";
   return {
     ...raw,
     exercise: meta.name,
@@ -61,7 +62,8 @@ export function normalizeWorkoutRecord(raw) {
     exerciseKey: raw.exerciseKey || meta.key,
     muscleGroup: raw.muscleGroup || meta.muscleGroup || "",
     movementPattern: raw.movementPattern || meta.pattern || "",
-    source: raw.source || (raw.sessionId ? "session" : "manual")
+    source: raw.source || (raw.sessionId ? "session" : "manual"),
+    loadMode
   };
 }
 

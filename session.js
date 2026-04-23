@@ -2,6 +2,10 @@ import { getExerciseMeta, normalizeWorkoutRecord } from "./catalog.js";
 import { calcVolumeFromEntries, datePartFromIso, FALLBACK_REST_SECONDS, normalizeNameForMatch, optionalNumber, safeNumber, todayLocal, uid } from "./utils.js";
 import { getActiveRoutine, syncSessionHistoryEntry } from "./analytics-core.js";
 
+function resolveLoadMode(value) {
+  return value === "bodyweight" ? "bodyweight" : "kg";
+}
+
 export function createBlankSession() {
   return {
     active: false,
@@ -141,14 +145,18 @@ export function addSessionSet(state, exerciseId, payload) {
   const exercise = routine?.exercises.find((item) => item.id === exerciseId);
   if (!exercise) return { ok: false, message: "No se ha encontrado el ejercicio." };
 
-  const weight = Number(payload.weight);
+  const loadMode = resolveLoadMode(payload.loadMode);
+  const weight = loadMode === "bodyweight" ? 0 : Number(payload.weight);
   const reps = Number(payload.reps);
   // Nota: `0` es un descanso válido, por eso evitamos usar `||` aquí.
   const rest = safeNumber(payload.rest ?? exercise.rest ?? state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS, FALLBACK_REST_SECONDS);
   const isWarmup = Boolean(payload.isWarmup);
 
-  if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
-    return { ok: false, message: "Introduce un peso válido (puede ser 0) y repeticiones mayores que 0." };
+  if (!Number.isFinite(reps) || reps <= 0) {
+    return { ok: false, message: "Introduce repeticiones mayores que 0." };
+  }
+  if (loadMode === "kg" && (!Number.isFinite(weight) || weight < 0)) {
+    return { ok: false, message: "Introduce un peso válido (puede ser 0)." };
   }
 
   const meta = getExerciseMeta(exercise.name);
@@ -160,6 +168,7 @@ export function addSessionSet(state, exerciseId, payload) {
     muscleGroup: meta.muscleGroup,
     movementPattern: meta.pattern,
     weight,
+    loadMode,
     reps,
     rpe: optionalNumber(payload.rpe, { min: 1, max: 10 }),
     rest,
@@ -195,15 +204,20 @@ export function updateSessionSet(state, entryId, payload) {
   const index = state.session.setEntries.findIndex((item) => item.id === entryId);
   if (index < 0) return { ok: false, message: "No se ha encontrado la serie para editar." };
   const current = state.session.setEntries[index];
-  const weight = Number(payload.weight);
+  const loadMode = resolveLoadMode(payload.loadMode ?? current.loadMode);
+  const weight = loadMode === "bodyweight" ? 0 : Number(payload.weight);
   const reps = Number(payload.reps);
   const rpe = payload.rpe === "" || payload.rpe == null ? "" : optionalNumber(payload.rpe, { min: 1, max: 10 });
-  if (!Number.isFinite(weight) || weight < 0 || !Number.isFinite(reps) || reps <= 0) {
-    return { ok: false, message: "La edición requiere peso válido y reps mayores a 0." };
+  if (!Number.isFinite(reps) || reps <= 0) {
+    return { ok: false, message: "La edición requiere reps mayores a 0." };
+  }
+  if (loadMode === "kg" && (!Number.isFinite(weight) || weight < 0)) {
+    return { ok: false, message: "La edición requiere peso válido." };
   }
   state.session.setEntries[index] = {
     ...current,
     weight,
+    loadMode,
     reps,
     rpe,
     isWarmup: Boolean(payload.isWarmup),
@@ -266,6 +280,7 @@ export function copyLastSessionIntoActive(state, confirmReplace = window.confirm
       muscleGroup: matchedExercise.muscleGroup || item.muscleGroup || "",
       movementPattern: matchedExercise.movementPattern || item.movementPattern || "",
       weight: safeNumber(item.weight, 0),
+      loadMode: resolveLoadMode(item.loadMode),
       reps: Math.max(1, safeNumber(item.reps, 1)),
       rpe: optionalNumber(item.rpe, { min: 1, max: 10 }),
       rest: optionalNumber(item.rest, { min: 0 }),
@@ -341,6 +356,7 @@ export function endSession(state) {
     muscleGroup: entry.muscleGroup || "",
     movementPattern: entry.movementPattern || "",
     weight: Number(entry.weight || 0),
+    loadMode: resolveLoadMode(entry.loadMode),
     sets: 1,
     reps: Number(entry.reps || 0),
     rpe: entry.rpe === "" ? "" : Number(entry.rpe),

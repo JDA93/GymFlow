@@ -137,6 +137,28 @@ let isSyncingManualWorkoutPanel = false;
 let routineSelectsKey = "";
 let muscleFilterKey = "";
 let routineDayFilterKey = "";
+let sessionChannel = null;
+let applyingRemoteSync = false;
+const SESSION_CHANNEL_NAME = "gymflow-session-sync-v1";
+const SESSION_WINDOW_NAME = "gymflow-active-session";
+const SESSION_VIEW_QUERY = "active-session";
+const SESSION_CLIENT_ID = uid();
+
+function isDedicatedSessionView() {
+  return new URLSearchParams(window.location.search).get("view") === SESSION_VIEW_QUERY;
+}
+
+function getDedicatedSessionUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.set("view", SESSION_VIEW_QUERY);
+  return url.toString();
+}
+
+function getMainAppUrl() {
+  const url = new URL(window.location.href);
+  url.searchParams.delete("view");
+  return url.toString();
+}
 
 function resolveNumberPreserveZero(value, fallback, { min = null } = {}) {
   const raw = typeof value === "string" ? value.trim() : value;
@@ -168,6 +190,87 @@ function safeCloseDialog(dialogEl) {
   dialogEl.removeAttribute("open");
 }
 
+function getQuickLoadMode(exerciseId) {
+  const selected = document.querySelector(`input[name="session-load-mode-${CSS.escape(exerciseId)}"]:checked`);
+  return selected?.value === "bodyweight" ? "bodyweight" : "kg";
+}
+
+function setQuickLoadModeUi(exerciseId, mode) {
+  const loadMode = mode === "bodyweight" ? "bodyweight" : "kg";
+  const radio = document.querySelector(`input[name="session-load-mode-${CSS.escape(exerciseId)}"][value="${loadMode}"]`);
+  if (radio) radio.checked = true;
+  const weightInput = document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`);
+  if (weightInput) {
+    weightInput.disabled = loadMode === "bodyweight";
+    weightInput.required = loadMode === "kg";
+  }
+}
+
+function syncLoadModeInputs() {
+  document.querySelectorAll('input[name^="session-load-mode-"]:checked').forEach((input) => {
+    const exerciseId = input.name.replace("session-load-mode-", "");
+    setQuickLoadModeUi(exerciseId, input.value);
+  });
+}
+
+function applyRouteMode() {
+  const focused = isDedicatedSessionView();
+  document.body.classList.toggle("dedicated-session-view", focused);
+  if (focused) setActiveTab(store.state, "session");
+}
+
+function initSessionSyncChannel() {
+  if (typeof BroadcastChannel !== "function") return;
+  sessionChannel = new BroadcastChannel(SESSION_CHANNEL_NAME);
+  sessionChannel.onmessage = (event) => {
+    const payload = event?.data || {};
+    if (!payload || payload.clientId === SESSION_CLIENT_ID || !payload.state) return;
+    applyingRemoteSync = true;
+    store.state = migrateState(payload.state);
+    refreshWorkoutDependentAreas();
+    applyingRemoteSync = false;
+    if (isDedicatedSessionView() && !store.state.session.active) {
+      exitDedicatedSessionView();
+    }
+  };
+}
+
+function broadcastSessionSync(reason = "sync") {
+  if (!sessionChannel || applyingRemoteSync) return;
+  sessionChannel.postMessage({ reason, clientId: SESSION_CLIENT_ID, state: safeClone(store.state), sentAt: Date.now() });
+}
+
+function openDedicatedSessionView() {
+  if (isDedicatedSessionView()) {
+    applyRouteMode();
+    return;
+  }
+  const focusedUrl = getDedicatedSessionUrl();
+  try {
+    const popup = window.open(focusedUrl, SESSION_WINDOW_NAME);
+    if (popup) {
+      popup.focus?.();
+      return;
+    }
+  } catch (_error) {
+    // noop
+  }
+  window.location.href = focusedUrl;
+}
+
+function exitDedicatedSessionView() {
+  if (window.opener && !window.opener.closed) {
+    try {
+      window.opener.focus();
+      window.close();
+      if (window.closed) return;
+    } catch (_error) {
+      // noop
+    }
+  }
+  window.location.href = getMainAppUrl();
+}
+
 function fillSelectWithOptions(selectEl, options, { placeholderLabel = "", placeholderValue = "" } = {}) {
   if (!selectEl) return;
   const fragment = document.createDocumentFragment();
@@ -196,6 +299,7 @@ async function boot() {
   syncAllSessionHistory(store.state);
   pwa = createPwaManager(els, () => renderSettingsArea());
   await pwa.init();
+  initSessionSyncChannel();
   bindEvents();
   setDefaultDates();
   cancelRoutineEdit();
@@ -203,6 +307,8 @@ async function boot() {
   cancelMeasurementEdit();
   setActiveTab(store.state, store.state.ui.activeTab || "dashboard");
   refreshAll();
+  applyRouteMode();
+  syncLoadModeInputs();
   updateNetworkStatus();
   startTickers();
   store.queueSave();
@@ -218,6 +324,7 @@ function bindEvents() {
   });
 
   document.addEventListener("click", handleDelegatedClick);
+  document.addEventListener("change", handleDelegatedChange);
 
   els.loadDemoBtn.addEventListener("click", loadDemoData);
   els.exportBtn.addEventListener("click", exportJson);
@@ -271,6 +378,7 @@ function bindEvents() {
   els.sessionNotes.addEventListener("input", (event) => {
     setSessionNotes(store.state, event.target.value);
     store.queueSave();
+    broadcastSessionSync("notes-updated");
   });
   els.startRestBtn.addEventListener("click", () => startRestTimer(Number(store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS)));
   els.stopRestBtn.addEventListener("click", stopRestTimer);
@@ -371,6 +479,20 @@ function bindEvents() {
   });
 }
 
+function handleDelegatedChange(event) {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement)) return;
+  if (input.name.startsWith("session-load-mode-")) {
+    const exerciseId = input.name.replace("session-load-mode-", "");
+    setQuickLoadModeUi(exerciseId, input.value);
+  }
+  if (input.name === "loadMode" && els.sessionSetEditorForm?.weight) {
+    const isBodyweight = input.value === "bodyweight";
+    els.sessionSetEditorForm.weight.disabled = isBodyweight;
+    els.sessionSetEditorForm.weight.required = !isBodyweight;
+  }
+}
+
 function handleTabKeydown(event) {
   const tabs = [...document.querySelectorAll(".tab")];
   const currentIndex = tabs.indexOf(event.currentTarget);
@@ -411,7 +533,7 @@ function handleAction(action, id, trigger) {
       loadDemoData();
       break;
     case "continue-session":
-      setActiveTab(store.state, "session");
+      openDedicatedSessionView();
       break;
     case "start-routine":
       startRoutineById(id);
@@ -475,6 +597,9 @@ function handleAction(action, id, trigger) {
       break;
     case "jump-next-exercise":
       jumpToNextExercise(id);
+      break;
+    case "back-main-app":
+      exitDedicatedSessionView();
       break;
     case "remove-routine-row":
       trigger.closest(".exercise-row")?.remove();
@@ -580,6 +705,8 @@ function renderSessionArea({ syncSelects = true } = {}) {
     });
   }
   renderSession(store.state, els);
+  syncLoadModeInputs();
+  applyRouteMode();
 }
 
 function renderRoutinesArea() {
@@ -747,6 +874,7 @@ function startRoutineById(routineId) {
     store.queueSave();
     setActiveTab(store.state, "session");
     requestWakeLock();
+    openDedicatedSessionView();
     try {
       refreshWorkoutDependentAreas();
     } catch (error) {
@@ -760,9 +888,11 @@ function startRoutineById(routineId) {
       }
       toast(els, "La sesión se inició, pero hubo un problema al refrescar la pantalla.");
     }
+    broadcastSessionSync("session-started");
   }
   if (result.status === "existing") {
     setActiveTab(store.state, "session");
+    openDedicatedSessionView();
   }
   if (result.message) toast(els, result.message);
 }
@@ -798,6 +928,8 @@ async function handleEndSession() {
   renderMeasurementsArea();
   renderSettingsArea();
   toast(els, result.message);
+  broadcastSessionSync("session-ended");
+  if (isDedicatedSessionView()) exitDedicatedSessionView();
   await store.flushSave();
 }
 
@@ -820,6 +952,8 @@ function handleDiscardSession(force = false) {
   renderSessionArea();
   renderDashboardArea();
   toast(els, hasData ? "Sesión descartada." : "Sesión vacía descartada.");
+  broadcastSessionSync("session-discarded");
+  if (isDedicatedSessionView()) exitDedicatedSessionView();
 }
 
 function handleCopyLastSession() {
@@ -832,6 +966,7 @@ function handleCopyLastSession() {
   renderSessionArea();
   renderDashboardArea();
   toast(els, result.message);
+  broadcastSessionSync("session-copied");
 }
 
 function handleAddSessionSet(exerciseId) {
@@ -843,6 +978,7 @@ function handleAddSessionSet(exerciseId) {
 
   const result = addSessionSet(store.state, exerciseId, {
     weight: Number(weightInput?.value),
+    loadMode: getQuickLoadMode(exerciseId),
     reps: Number(repsInput?.value),
     rpe: rpeInput?.value || "",
     rest: resolveNumberPreserveZero(
@@ -865,13 +1001,16 @@ function handleAddSessionSet(exerciseId) {
   renderDashboardArea();
   renderAnalyticsArea();
   toast(els, result.message);
+  broadcastSessionSync("set-added");
   if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
 
   window.requestAnimationFrame(() => {
     const focusTargetId = result.currentExerciseCompleted && result.nextExerciseId && result.nextExerciseId !== exerciseId ? result.nextExerciseId : exerciseId;
     document.querySelector(`#exercise-card-${CSS.escape(focusTargetId)}`)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    document.querySelector(`#session-weight-${CSS.escape(focusTargetId)}`)?.focus();
-    document.querySelector(`#session-weight-${CSS.escape(focusTargetId)}`)?.select();
+    const mode = getQuickLoadMode(focusTargetId);
+    const targetSelector = mode === "bodyweight" ? `#session-reps-${CSS.escape(focusTargetId)}` : `#session-weight-${CSS.escape(focusTargetId)}`;
+    document.querySelector(targetSelector)?.focus();
+    if (mode === "kg") document.querySelector(targetSelector)?.select();
   });
 }
 
@@ -894,8 +1033,10 @@ function handleDeleteSessionSet(entryId) {
       renderDashboardArea();
       renderAnalyticsArea();
       toast(els, "Serie recuperada.");
+      broadcastSessionSync("set-restored");
     }
   });
+  broadcastSessionSync("set-deleted");
 }
 
 function handleToggleSkipExercise(exerciseId) {
@@ -919,6 +1060,7 @@ function fillLastReferenceValues(exerciseId) {
   document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`).value = ref.weight;
   document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = ref.reps;
   document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = ref.rest ?? exercise.rest ?? store.state.preferences.defaultRestSeconds;
+  setQuickLoadModeUi(exerciseId, ref.loadMode || "kg");
   toast(els, "Se han rellenado los valores de la última referencia.");
 }
 
@@ -932,6 +1074,7 @@ function repeatLastSessionSet(exerciseId) {
   document.querySelector(`#session-reps-${CSS.escape(exerciseId)}`).value = last.reps;
   document.querySelector(`#session-rest-${CSS.escape(exerciseId)}`).value = last.rest ?? store.state.preferences.defaultRestSeconds;
   document.querySelector(`#session-rpe-${CSS.escape(exerciseId)}`).value = last.rpe === "" ? "" : last.rpe;
+  setQuickLoadModeUi(exerciseId, last.loadMode || "kg");
   toast(els, "Se han copiado los valores de la última serie.");
 }
 
@@ -943,6 +1086,7 @@ function saveLastSessionSetAgain(exerciseId) {
   }
   const result = addSessionSet(store.state, exerciseId, {
     weight: Number(last.weight),
+    loadMode: last.loadMode || "kg",
     reps: Number(last.reps),
     rpe: last.rpe,
     rest: Number(last.rest ?? store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS),
@@ -957,6 +1101,7 @@ function saveLastSessionSetAgain(exerciseId) {
   renderDashboardArea();
   renderAnalyticsArea();
   toast(els, "Serie duplicada y guardada.");
+  broadcastSessionSync("set-duplicated");
   if (store.state.preferences.autoStartRest) startRestTimer(result.rest);
 }
 
@@ -974,6 +1119,7 @@ function prefillFromExistingSet(entryId) {
   if (rpeInput) rpeInput.value = entry.rpe === "" ? "" : entry.rpe;
   if (restInput) restInput.value = entry.rest ?? store.state.preferences.defaultRestSeconds;
   if (warmupInput) warmupInput.checked = Boolean(entry.isWarmup);
+  setQuickLoadModeUi(exerciseId, entry.loadMode || "kg");
   toast(els, "Serie cargada en el formulario rápido.");
 }
 
@@ -987,10 +1133,14 @@ function handleEditSessionSet(entryId) {
   els.sessionSetEditorTitle.textContent = `Editar serie · ${entry.exerciseName || "Ejercicio"}`;
   els.sessionSetEditorForm.entryId.value = entry.id;
   els.sessionSetEditorForm.weight.value = entry.weight;
+  const loadModeInput = els.sessionSetEditorForm.querySelector(`input[name="loadMode"][value="${entry.loadMode === "bodyweight" ? "bodyweight" : "kg"}"]`);
+  if (loadModeInput) loadModeInput.checked = true;
   els.sessionSetEditorForm.reps.value = entry.reps;
   els.sessionSetEditorForm.rpe.value = entry.rpe === "" ? "" : entry.rpe;
   els.sessionSetEditorForm.rest.value = entry.rest ?? store.state.preferences.defaultRestSeconds ?? FALLBACK_REST_SECONDS;
   els.sessionSetEditorForm.isWarmup.checked = Boolean(entry.isWarmup);
+  els.sessionSetEditorForm.weight.disabled = entry.loadMode === "bodyweight";
+  els.sessionSetEditorForm.weight.required = entry.loadMode !== "bodyweight";
   safeShowDialog(els.sessionSetEditorDialog);
 }
 
@@ -1001,6 +1151,7 @@ function saveSessionSetEditor(event) {
   if (!entryId) return;
   const result = updateSessionSet(store.state, entryId, {
     weight: Number(form.get("weight")),
+    loadMode: form.get("loadMode") === "bodyweight" ? "bodyweight" : "kg",
     reps: Number(form.get("reps")),
     rpe: form.get("rpe") === "" ? "" : Number(form.get("rpe")),
     rest: Number(form.get("rest")),
@@ -1016,6 +1167,7 @@ function saveSessionSetEditor(event) {
   renderDashboardArea();
   renderAnalyticsArea();
   toast(els, result.message);
+  broadcastSessionSync("set-edited");
 }
 
 function focusExerciseCard(exerciseId) {
@@ -1024,7 +1176,9 @@ function focusExerciseCard(exerciseId) {
   if (!card) return;
   if (card.tagName.toLowerCase() === "details") card.open = true;
   card.scrollIntoView({ behavior: "smooth", block: "start" });
-  document.querySelector(`#session-weight-${CSS.escape(exerciseId)}`)?.focus();
+  const mode = getQuickLoadMode(exerciseId);
+  const targetSelector = mode === "bodyweight" ? `#session-reps-${CSS.escape(exerciseId)}` : `#session-weight-${CSS.escape(exerciseId)}`;
+  document.querySelector(targetSelector)?.focus();
 }
 
 function jumpToNextExercise(fromExerciseId = "") {
