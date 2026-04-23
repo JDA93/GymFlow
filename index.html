@@ -34,31 +34,42 @@
 
       <main id="mainContent" class="layout">
         <section id="home" class="tab-panel active" role="tabpanel" aria-label="Inicio">
-          <article class="home-stage">
-            <div class="home-logo-badge" aria-hidden="true">
-              <img src="icons/icon-192.png" alt="" width="96" height="96" />
+          <article class="home-command-center" aria-label="Centro de control">
+            <header class="home-header">
+              <p class="home-kicker">Inicio operativo</p>
+              <h2>Tu centro de entrenamiento</h2>
+              <p class="home-subtitle">Abre GymFlow Pro y actúa en segundos: reanuda sesión, entrena o registra lo importante.</p>
+            </header>
+
+            <section id="homePrimaryCard" class="home-primary" aria-live="polite"></section>
+
+            <section id="homeOnboarding" class="home-onboarding" hidden></section>
+
+            <div class="home-grid" aria-label="Acciones y navegación">
+              <section class="home-block" aria-labelledby="homeQuickActionsTitle">
+                <div class="home-block-head">
+                  <h3 id="homeQuickActionsTitle">Acciones rápidas</h3>
+                  <p>Accede a lo que más usas sin pasar por menús intermedios.</p>
+                </div>
+                <div id="homeSecondaryActions" class="home-action-list"></div>
+              </section>
+
+              <section class="home-block" aria-labelledby="homeUtilityTitle">
+                <div class="home-block-head">
+                  <h3 id="homeUtilityTitle">Sistema y planificación</h3>
+                  <p>Objetivos, analítica y ajustes para mantener el rumbo.</p>
+                </div>
+                <div id="homeUtilityNav" class="home-utility-list"></div>
+              </section>
             </div>
-            <p class="home-kicker">Inicio</p>
-            <h2>GymFlow Pro</h2>
-            <p class="home-subtitle">Tu centro de entrenamiento offline para decidir rápido qué hacer ahora.</p>
-            <div class="home-nav-grid" role="navigation" aria-label="Navegación principal de inicio">
-              <button class="home-nav-card" type="button" data-action="open-tab" data-id="dashboard">
-                <strong>Hoy</strong>
-                <span>Resumen del día, señales y progreso.</span>
-              </button>
-              <button class="home-nav-card" type="button" data-action="open-session-smart">
-                <strong>Sesión</strong>
-                <span>Continúa la sesión activa o inicia una rutina.</span>
-              </button>
-              <button class="home-nav-card" type="button" data-action="open-tab" data-id="logs">
-                <strong>Historial</strong>
-                <span>Revisa sesiones, PRs y registros recientes.</span>
-              </button>
-              <button class="home-nav-card" type="button" data-action="open-tab" data-id="more">
-                <strong>Más</strong>
-                <span>Rutinas, medidas, evolución, objetivos y ajustes.</span>
-              </button>
-            </div>
+
+            <section class="home-block" aria-labelledby="homeSignalsTitle">
+              <div class="home-block-head">
+                <h3 id="homeSignalsTitle">Estado rápido</h3>
+                <p>Solo señales útiles para decidir el siguiente paso.</p>
+              </div>
+              <div id="homeRecencyStats" class="home-metadata-grid"></div>
+            </section>
           </article>
         </section>
         <section id="dashboard" class="tab-panel" role="tabpanel" aria-label="Hoy" hidden>

@@ -20,7 +20,7 @@ import {
 } from "./session.js";
 import { createStore, defaultState, migrateState } from "./store.js";
 import { setActiveTab, toast } from "./ui-common.js";
-import { renderDashboard, renderStats } from "./ui-dashboard.js";
+import { renderDashboard, renderHome, renderStats } from "./ui-dashboard.js";
 import { renderAnalytics, renderGoalForm, renderGoalSummary, renderPreferencesForm, renderPwaStatus } from "./ui-meta.js";
 import { renderMeasurements, renderPrList, renderRoutines, renderWorkoutList } from "./ui-records.js";
 import { renderSession } from "./ui-session.js";
@@ -39,6 +39,11 @@ const els = {
   refreshAppBtn: document.querySelector("#refreshAppBtn"),
   updateBanner: document.querySelector("#updateBanner"),
   dashboardPrimaryCard: document.querySelector("#dashboardPrimaryCard"),
+  homePrimaryCard: document.querySelector("#homePrimaryCard"),
+  homeSecondaryActions: document.querySelector("#homeSecondaryActions"),
+  homeUtilityNav: document.querySelector("#homeUtilityNav"),
+  homeRecencyStats: document.querySelector("#homeRecencyStats"),
+  homeOnboarding: document.querySelector("#homeOnboarding"),
   recommendedRoutine: document.querySelector("#recommendedRoutine"),
   quickSignals: document.querySelector("#quickSignals"),
   recentStory: document.querySelector("#recentStory"),
@@ -294,7 +299,6 @@ boot();
 
 async function boot() {
   store = await createStore(els.saveStatusBadge);
-  ensureMinimumData();
   selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
   syncAllSessionHistory(store.state);
   pwa = createPwaManager(els, () => renderSettingsArea());
@@ -624,6 +628,7 @@ function refreshAll() {
   refreshExerciseOptions();
   populateRoutineSelects();
   populateLogFilters();
+  renderHomeArea();
   renderDashboardArea();
   renderMoreArea();
   renderSessionArea({ syncSelects: false });
@@ -683,6 +688,10 @@ function populateLogFilters() {
   els.logMuscleFilter.value = store.state.ui.logMuscle || "all";
   els.logSearchInput.value = store.state.ui.logSearch || "";
   els.logSortSelect.value = store.state.ui.logSort || "date_desc";
+}
+
+function renderHomeArea() {
+  renderHome(store.state, els);
 }
 
 function renderDashboardArea() {
@@ -773,6 +782,7 @@ function refreshWorkoutDependentAreas() {
   refreshExerciseOptions();
   populateRoutineSelects();
   populateLogFilters();
+  renderHomeArea();
   renderDashboardArea();
   renderMoreArea();
   renderSessionArea({ syncSelects: false });
@@ -783,6 +793,7 @@ function refreshWorkoutDependentAreas() {
 }
 
 function refreshMeasurementDependentAreas() {
+  renderHomeArea();
   renderDashboardArea();
   renderMeasurementsArea();
   renderAnalyticsArea();
@@ -793,53 +804,13 @@ function refreshRoutineDependentAreas() {
   refreshExerciseOptions();
   populateRoutineSelects();
   populateLogFilters();
+  renderHomeArea();
   renderDashboardArea();
   renderMoreArea();
   renderSessionArea({ syncSelects: false });
   renderRoutinesArea();
   renderLogsArea({ syncSelects: false, syncFilters: false });
   renderAnalyticsArea();
-}
-
-function ensureMinimumData() {
-  if (!store.state.routines.length) {
-    store.state.routines = starterRoutines();
-  }
-}
-
-function starterRoutines() {
-  return [
-    {
-      id: uid(),
-      name: "Torso A",
-      day: "Día A",
-      focus: "Hipertrofia controlada",
-      notes: "Bloque base",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      exercises: [
-        normalizeRoutineExercise({ id: uid(), block: "A1", name: "Press banca", sets: 4, reps: "6-8", rest: 120, notes: "Pausa 1s en pecho" }),
-        normalizeRoutineExercise({ id: uid(), block: "A2", name: "Remo con barra", sets: 4, reps: "8-10", rest: 90 }),
-        normalizeRoutineExercise({ id: uid(), block: "B", name: "Press militar", sets: 3, reps: "8-10", rest: 90 }),
-        normalizeRoutineExercise({ id: uid(), block: "C", name: "Fondos", sets: 3, reps: "8-12", rest: 75 })
-      ]
-    },
-    {
-      id: uid(),
-      name: "Pierna B",
-      day: "Día B",
-      focus: "Fuerza + cadena posterior",
-      notes: "Prioridad básicos",
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-      exercises: [
-        normalizeRoutineExercise({ id: uid(), block: "A", name: "Sentadilla", sets: 4, reps: "5-6", rest: 150 }),
-        normalizeRoutineExercise({ id: uid(), block: "B", name: "Peso muerto rumano", sets: 3, reps: "8-10", rest: 120 }),
-        normalizeRoutineExercise({ id: uid(), block: "C1", name: "Prensa", sets: 3, reps: "10-12", rest: 90 }),
-        normalizeRoutineExercise({ id: uid(), block: "C2", name: "Plancha", sets: 3, reps: "30", rest: 45 })
-      ]
-    }
-  ];
 }
 
 function setDefaultDates() {
@@ -1767,7 +1738,6 @@ function commitFullStateReplacement(nextState, { successMessage }) {
   try {
     prepareForFullStateReplacement();
     store.state = migrateState(nextState);
-    ensureMinimumData();
     syncAllSessionHistory(store.state);
     selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
     cancelRoutineEdit();
@@ -1781,7 +1751,6 @@ function commitFullStateReplacement(nextState, { successMessage }) {
     console.error(error);
     try {
       store.state = migrateState(previousState);
-      ensureMinimumData();
       syncAllSessionHistory(store.state);
       selectedSessionRoutineId = store.state.session.routineId || store.state.routines[0]?.id || "";
       cancelRoutineEdit();

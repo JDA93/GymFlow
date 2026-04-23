@@ -30,6 +30,143 @@ export function renderStats(state, els) {
   els.statBestE1rmLabel.textContent = stats.bestE1rm ? stats.bestE1rm.item.exercise : "Estimado";
 }
 
+
+
+export function renderHome(state, els) {
+  if (!els.homePrimaryCard || !els.homeSecondaryActions || !els.homeUtilityNav || !els.homeRecencyStats || !els.homeOnboarding) return;
+  const suggestion = getSuggestedRoutine(state);
+  const hasActiveSession = Boolean(state?.session?.active);
+  const hasAnyData = ensureArray(state.routines).length || ensureArray(state.workouts).length || ensureArray(state.measurements).length;
+
+  const sessionEntries = ensureArray(state?.session?.setEntries);
+  const effectiveSets = sessionEntries.filter((entry) => !entry.isWarmup).length;
+  const sessionVolume = sessionEntries.reduce((sum, entry) => sum + (entry.isWarmup ? 0 : Number(entry.weight || 0) * Number(entry.reps || 0)), 0);
+
+  let primaryHtml = "";
+  if (hasActiveSession) {
+    const routineName = ensureArray(state.routines).find((item) => item.id === state.session.routineId)?.name || "Sesión en curso";
+    primaryHtml = `
+      <div class="home-primary-top">
+        <span class="home-eyebrow success">Sesión activa</span>
+        <h3>Retoma tu entrenamiento ahora</h3>
+        <p>Tienes una sesión de <strong>${escapeHtml(routineName)}</strong> abierta: ${effectiveSets} series efectivas y ${formatNumber(sessionVolume)} kg acumulados.</p>
+      </div>
+      <div class="home-primary-actions">
+        <button type="button" data-action="continue-session">Reanudar sesión activa</button>
+        <button class="ghost" type="button" data-action="open-tab" data-id="session">Abrir panel de sesión</button>
+      </div>
+    `;
+    els.homePrimaryCard.dataset.state = "active";
+  } else if (!suggestion?.routine) {
+    primaryHtml = `
+      <div class="home-primary-top">
+        <span class="home-eyebrow">Comienza aquí</span>
+        <h3>Crea tu primera rutina</h3>
+        <p>Configura tu plan y usa GymFlow Pro para registrar sesiones, progreso corporal y decisiones de entrenamiento.</p>
+      </div>
+      <div class="home-primary-actions">
+        <button type="button" data-action="open-tab" data-id="routines">Crear rutina</button>
+        <button class="ghost" type="button" data-action="load-demo">Cargar demo guiada</button>
+      </div>
+    `;
+    els.homePrimaryCard.dataset.state = "setup";
+  } else {
+    const sinceLabel = suggestion.daysSince == null ? "Sin sesiones previas" : `${suggestion.daysSince} días desde la última vez`;
+    primaryHtml = `
+      <div class="home-primary-top">
+        <span class="home-eyebrow">Siguiente mejor acción</span>
+        <h3>Entrena ${escapeHtml(suggestion.routine.name)}</h3>
+        <p>${escapeHtml(suggestion.reason)} · ${escapeHtml(sinceLabel)}.</p>
+      </div>
+      <div class="home-primary-actions">
+        <button type="button" data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Iniciar rutina recomendada</button>
+        <button class="ghost" type="button" data-action="open-tab" data-id="session">Elegir otra rutina</button>
+      </div>
+    `;
+    els.homePrimaryCard.dataset.state = "recommended";
+  }
+
+  els.homePrimaryCard.innerHTML = primaryHtml;
+
+  els.homeOnboarding.hidden = Boolean(hasAnyData);
+  if (!hasAnyData) {
+    els.homeOnboarding.innerHTML = `
+      <h3>Nuevo en GymFlow Pro</h3>
+      <p>Todo funciona offline y se guarda en tu dispositivo. Empieza creando una rutina o cargando una demo editable.</p>
+      <div class="home-primary-actions">
+        <button type="button" data-action="open-tab" data-id="routines">Crear rutina</button>
+        <button class="ghost" type="button" data-action="load-demo">Cargar demo</button>
+      </div>
+    `;
+  }
+
+  const latestWorkoutDate = ensureArray(state.workouts).map((item) => item.date).filter(Boolean).sort((a, b) => String(b).localeCompare(String(a)))[0] || null;
+  const daysFromWorkout = latestWorkoutDate ? Math.max(0, daysBetween(latestWorkoutDate, todayLocal())) : null;
+  const latestMeasurement = [...ensureArray(state.measurements)].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0] || null;
+  const hasGoals = Boolean(state.goals?.focusGoal || state.goals?.goalDate || state.goals?.athleteName || Object.values(state.goals?.resultGoals || {}).some(Boolean) || Object.values(state.goals?.habits || {}).some(Boolean));
+
+  els.homeSecondaryActions.innerHTML = [
+    {
+      title: "Sesión",
+      subtitle: hasActiveSession ? "Reanudar la sesión que dejaste abierta." : (suggestion?.routine ? "Iniciar sesión desde una rutina." : "Primero crea o carga una rutina."),
+      meta: hasActiveSession ? "En progreso" : (suggestion?.routine ? "Lista para empezar" : "Sin rutinas"),
+      action: "open-session-smart"
+    },
+    {
+      title: "Historial",
+      subtitle: "Revisa entrenos recientes, PRs y registros manuales.",
+      meta: latestWorkoutDate ? `Último registro: ${formatDate(latestWorkoutDate)}` : "Aún sin registros",
+      action: "open-tab",
+      id: "logs"
+    },
+    {
+      title: "Rutinas",
+      subtitle: "Construye, ajusta y ordena tu biblioteca.",
+      meta: `${ensureArray(state.routines).length} rutina${ensureArray(state.routines).length === 1 ? "" : "s"}`,
+      action: "open-tab",
+      id: "routines"
+    },
+    {
+      title: "Check-in corporal",
+      subtitle: "Registra peso, cintura o sueño en segundos.",
+      meta: latestMeasurement ? `Última: ${formatDate(latestMeasurement.date)}` : "Sin mediciones",
+      action: "open-tab",
+      id: "measurements"
+    }
+  ].map((item) => `
+    <button class="home-action-card ghost" type="button" data-action="${item.action}" ${item.id ? `data-id="${item.id}"` : ""}>
+      <strong>${escapeHtml(item.title)}</strong>
+      <small>${escapeHtml(item.subtitle)}</small>
+      <span class="meta">${escapeHtml(item.meta)}</span>
+    </button>
+  `).join("");
+
+  els.homeUtilityNav.innerHTML = [
+    { title: "Evolución", subtitle: "Frecuencia, volumen y señales.", meta: "Analítica", id: "analytics" },
+    { title: "Objetivos", subtitle: "Resultados y hábitos del bloque.", meta: hasGoals ? "Objetivos activos" : "Configurar objetivos", id: "goals" },
+    { title: "Ajustes", subtitle: "Datos, backup y comportamiento.", meta: "Sistema", id: "settings" },
+    { title: "Panel Hoy", subtitle: "Dashboard completo y tendencias.", meta: "Vista ampliada", id: "dashboard" }
+  ].map((item) => `
+    <button class="home-utility-card ghost" type="button" data-action="open-tab" data-id="${item.id}">
+      <strong>${escapeHtml(item.title)}</strong>
+      <small>${escapeHtml(item.subtitle)}</small>
+      <span class="meta">${escapeHtml(item.meta)}</span>
+    </button>
+  `).join("");
+
+  els.homeRecencyStats.innerHTML = [
+    { label: "Sesión activa", value: hasActiveSession ? "Sí" : "No" },
+    { label: "Rutinas", value: String(ensureArray(state.routines).length) },
+    { label: "Último entreno", value: daysFromWorkout == null ? "Sin datos" : (daysFromWorkout === 0 ? "Hoy" : `Hace ${daysFromWorkout} día${daysFromWorkout === 1 ? "" : "s"}`) },
+    { label: "Última medición", value: latestMeasurement?.date ? formatDate(latestMeasurement.date) : "Sin datos" }
+  ].map((item) => `
+    <article class="home-meta-item">
+      <p>${escapeHtml(item.label)}</p>
+      <strong>${escapeHtml(item.value)}</strong>
+    </article>
+  `).join("");
+}
+
 export function renderDashboard(state, els, exerciseOptions) {
   renderPrimaryAction(state, els);
   renderQuickSignals(state, els);
