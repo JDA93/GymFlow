@@ -188,6 +188,9 @@
                   <button id="copyLastSessionBtn" class="ghost">Copiar última</button>
                   <button id="endSessionBtn" class="ghost">Cerrar y guardar</button>
                 </div>
+                <div class="session-actions-row dedicated-only">
+                  <button id="backToMainAppBtn" class="ghost" type="button" data-action="back-main-app">Volver a la app</button>
+                </div>
                 <div class="danger-zone-inline">
                   <button id="discardSessionBtn" class="ghost danger-ghost" type="button">Descartar sesión activa</button>
                 </div>
@@ -843,6 +846,13 @@
         <h3 id="sessionSetEditorTitle">Editar serie</h3>
         <input type="hidden" name="entryId" />
         <div class="mini-grid">
+          <div class="form-field">
+            <label>Modo de carga</label>
+            <div class="segmented-control segmented-control--editor">
+              <label><input type="radio" name="loadMode" value="kg" checked />Kg</label>
+              <label><input type="radio" name="loadMode" value="bodyweight" />Peso corporal</label>
+            </div>
+          </div>
           <div class="form-field">
             <label for="sessionEditorWeight">Peso</label>
             <input id="sessionEditorWeight" name="weight" type="number" min="0" step="0.5" required />
