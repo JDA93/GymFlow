@@ -71,6 +71,7 @@ export function defaultState() {
       editingMeasurementId: "",
       editingGroupId: "",
       routineSearch: "",
+      routineGroupFilter: "all",
       routineDayFilter: "all",
       dashboardExerciseId: "",
       dashboardExerciseMetric: "e1rm",
@@ -280,6 +281,7 @@ export function migrateState(rawState) {
     day: String(routine.day || "").trim(),
     focus: String(routine.focus || "").trim(),
     notes: String(routine.notes || "").trim(),
+    routineGroup: String(routine.routineGroup || "").trim(),
     createdAt: routine.createdAt || new Date().toISOString(),
     updatedAt: routine.updatedAt || routine.createdAt || new Date().toISOString(),
     exercises: Array.isArray(routine.exercises)
