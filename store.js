@@ -65,7 +65,7 @@ export function defaultState() {
       restTimerEndsAt: ""
     },
     ui: {
-      activeTab: "dashboard",
+      activeTab: "home",
       editingWorkoutId: "",
       editingRoutineId: "",
       editingMeasurementId: "",
@@ -401,8 +401,8 @@ export function migrateState(rawState) {
   if (!base.ui.logDatePreset) base.ui.logDatePreset = "all";
   if (base.ui.activeTab === "tab-dashboard") base.ui.activeTab = "dashboard";
   if (base.ui.activeTab === "tab-session") base.ui.activeTab = "session";
-  if (![ "dashboard", "session", "logs", "more", "routines", "measurements", "analytics", "goals", "settings" ].includes(base.ui.activeTab)) {
-    base.ui.activeTab = "dashboard";
+  if (![ "home", "dashboard", "session", "logs", "more", "routines", "measurements", "analytics", "goals", "settings" ].includes(base.ui.activeTab)) {
+    base.ui.activeTab = "home";
   }
   if (!base.ui.moreSection) base.ui.moreSection = "routines";
 

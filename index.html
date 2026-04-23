@@ -31,55 +31,76 @@
         </div>
       </header>
 
-      <section class="hero-card hero-card--highlight" id="dashboardPrimaryCard"></section>
-
-      <section id="updateBanner" class="update-banner" hidden>
-        <div>
-          <strong>Hay una versión nueva lista para aplicar.</strong>
-          <p>La actualización se activará de forma predecible cuando pulses el botón.</p>
-        </div>
-        <button id="refreshAppBtn">Actualizar</button>
-      </section>
-
-      <section class="stats-grid four" aria-label="Resumen rápido">
-        <article class="stat-card accent-card">
-          <p>Días entrenados este mes</p>
-          <strong id="statSessionsMonth">0</strong>
-          <span>Frecuencia real</span>
-        </article>
-        <article class="stat-card">
-          <p>Continuidad</p>
-          <strong id="statStreak">0</strong>
-          <span>Días con inercia activa</span>
-        </article>
-        <article class="stat-card">
-          <p>Peso actual</p>
-          <strong id="statWeight">—</strong>
-          <span>Última medición</span>
-        </article>
-        <article class="stat-card">
-          <p>PR principal</p>
-          <strong id="statBestLift">—</strong>
-          <span id="statBestLiftLabel">Sin datos</span>
-        </article>
-        <article class="stat-card">
-          <p>e1RM top</p>
-          <strong id="statBestE1rm">—</strong>
-          <span id="statBestE1rmLabel">Estimado</span>
-        </article>
-      </section>
-
-      <nav class="tabbar" aria-label="Secciones principales">
-        <div class="tabbar-inner" role="tablist" aria-label="Navegación principal">
-          <button class="tab active" id="tab-dashboard" data-tab="dashboard" role="tab" aria-selected="true" aria-controls="dashboard" tabindex="0">Hoy</button>
-          <button class="tab" id="tab-session" data-tab="session" role="tab" aria-selected="false" aria-controls="session" tabindex="-1">Sesión</button>
-          <button class="tab" id="tab-logs" data-tab="logs" role="tab" aria-selected="false" aria-controls="logs" tabindex="-1">Historial</button>
-          <button class="tab" id="tab-more" data-tab="more" role="tab" aria-selected="false" aria-controls="more" tabindex="-1">Más</button>
-        </div>
-      </nav>
 
       <main id="mainContent" class="layout">
-        <section id="dashboard" class="tab-panel active" role="tabpanel" aria-labelledby="tab-dashboard">
+        <section id="home" class="tab-panel active" role="tabpanel" aria-label="Inicio">
+          <article class="home-stage">
+            <div class="home-logo-badge" aria-hidden="true">
+              <img src="icons/icon-192.png" alt="" width="96" height="96" />
+            </div>
+            <p class="home-kicker">Inicio</p>
+            <h2>GymFlow Pro</h2>
+            <p class="home-subtitle">Tu centro de entrenamiento offline para decidir rápido qué hacer ahora.</p>
+            <div class="home-nav-grid" role="navigation" aria-label="Navegación principal de inicio">
+              <button class="home-nav-card" type="button" data-action="open-tab" data-id="dashboard">
+                <strong>Hoy</strong>
+                <span>Resumen del día, señales y progreso.</span>
+              </button>
+              <button class="home-nav-card" type="button" data-action="open-session-smart">
+                <strong>Sesión</strong>
+                <span>Continúa la sesión activa o inicia una rutina.</span>
+              </button>
+              <button class="home-nav-card" type="button" data-action="open-tab" data-id="logs">
+                <strong>Historial</strong>
+                <span>Revisa sesiones, PRs y registros recientes.</span>
+              </button>
+              <button class="home-nav-card" type="button" data-action="open-tab" data-id="more">
+                <strong>Más</strong>
+                <span>Rutinas, medidas, evolución, objetivos y ajustes.</span>
+              </button>
+            </div>
+          </article>
+        </section>
+        <section id="dashboard" class="tab-panel" role="tabpanel" aria-label="Hoy" hidden>
+          <div class="panel-top-nav"><button class="ghost small" type="button" data-action="open-tab" data-id="home">Volver a Inicio</button></div>
+
+          <section class="hero-card hero-card--highlight" id="dashboardPrimaryCard"></section>
+
+          <section id="updateBanner" class="update-banner" hidden>
+            <div>
+              <strong>Hay una versión nueva lista para aplicar.</strong>
+              <p>La actualización se activará de forma predecible cuando pulses el botón.</p>
+            </div>
+            <button id="refreshAppBtn">Actualizar</button>
+          </section>
+
+          <section class="stats-grid four" aria-label="Resumen rápido">
+            <article class="stat-card accent-card">
+              <p>Días entrenados este mes</p>
+              <strong id="statSessionsMonth">0</strong>
+              <span>Frecuencia real</span>
+            </article>
+            <article class="stat-card">
+              <p>Continuidad</p>
+              <strong id="statStreak">0</strong>
+              <span>Días con inercia activa</span>
+            </article>
+            <article class="stat-card">
+              <p>Peso actual</p>
+              <strong id="statWeight">—</strong>
+              <span>Última medición</span>
+            </article>
+            <article class="stat-card">
+              <p>PR principal</p>
+              <strong id="statBestLift">—</strong>
+              <span id="statBestLiftLabel">Sin datos</span>
+            </article>
+            <article class="stat-card">
+              <p>e1RM top</p>
+              <strong id="statBestE1rm">—</strong>
+              <span id="statBestE1rmLabel">Estimado</span>
+            </article>
+          </section>
           <div class="panel-grid two">
             <article class="card card--emphasis">
               <div class="card-head">
@@ -170,7 +191,8 @@
           </article>
         </section>
 
-        <section id="session" class="tab-panel" role="tabpanel" aria-labelledby="tab-session" hidden>
+        <section id="session" class="tab-panel" role="tabpanel" aria-label="Sesión" hidden>
+          <div class="panel-top-nav main-only"><button class="ghost small" type="button" data-action="open-tab" data-id="home">Volver a Inicio</button></div>
           <div class="session-shell">
             <article class="card card--emphasis session-main-card">
               <div class="card-head">
@@ -306,7 +328,8 @@
         </section>
 
 
-        <section id="more" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
+        <section id="more" class="tab-panel" role="tabpanel" aria-label="Más" hidden>
+          <div class="panel-top-nav"><button class="ghost small" type="button" data-action="open-tab" data-id="home">Volver a Inicio</button></div>
           <article class="card">
             <div class="card-head">
               <div>
@@ -327,8 +350,8 @@
             </div>
           </article>
         </section>
-        <section id="routines" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
-          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Rutinas</span></div>
+        <section id="routines" class="tab-panel" role="tabpanel" aria-label="Rutinas" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="home">← Inicio</button><span>Rutinas</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -403,7 +426,8 @@
           </div>
         </section>
 
-        <section id="logs" class="tab-panel" role="tabpanel" aria-labelledby="tab-logs" hidden>
+        <section id="logs" class="tab-panel" role="tabpanel" aria-label="Historial" hidden>
+          <div class="panel-top-nav"><button class="ghost small" type="button" data-action="open-tab" data-id="home">Volver a Inicio</button></div>
           <div class="panel-grid two logs-layout">
             <article class="card">
               <div class="card-head">
@@ -476,8 +500,8 @@
           </div>
         </section>
 
-        <section id="measurements" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
-          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Medidas</span></div>
+        <section id="measurements" class="tab-panel" role="tabpanel" aria-label="Medidas" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="home">← Inicio</button><span>Medidas</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -559,8 +583,8 @@
           </div>
         </section>
 
-        <section id="analytics" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
-          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Evolución</span></div>
+        <section id="analytics" class="tab-panel" role="tabpanel" aria-label="Evolución" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="home">← Inicio</button><span>Evolución</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -645,8 +669,8 @@
           </div>
         </section>
 
-        <section id="goals" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
-          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Objetivos</span></div>
+        <section id="goals" class="tab-panel" role="tabpanel" aria-label="Objetivos" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="home">← Inicio</button><span>Objetivos</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">
@@ -735,8 +759,8 @@
           </div>
         </section>
 
-        <section id="settings" class="tab-panel" role="tabpanel" aria-labelledby="tab-more" hidden>
-          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="more">← Más</button><span>Ajustes</span></div>
+        <section id="settings" class="tab-panel" role="tabpanel" aria-label="Ajustes" hidden>
+          <div class="subtab-context"><button class="ghost small" data-action="open-tab" data-id="home">← Inicio</button><span>Ajustes</span></div>
           <div class="panel-grid two">
             <article class="card">
               <div class="card-head">

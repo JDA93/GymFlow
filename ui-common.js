@@ -23,7 +23,7 @@ export function cardHtml({ title = "", subtitle = "", chips = [], extraClass = "
 const MORE_TABS = new Set(["routines", "measurements", "analytics", "goals", "settings"]);
 
 export function setActiveTab(state, tabId) {
-  const resolvedTab = MORE_TABS.has(tabId) ? tabId : (tabId || "dashboard");
+  const resolvedTab = MORE_TABS.has(tabId) ? tabId : (tabId || "home");
   state.ui.activeTab = resolvedTab;
   const primaryTab = MORE_TABS.has(resolvedTab) ? "more" : resolvedTab;
 
