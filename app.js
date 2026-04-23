@@ -305,7 +305,7 @@ async function boot() {
   cancelRoutineEdit();
   cancelWorkoutEdit();
   cancelMeasurementEdit();
-  setActiveTab(store.state, store.state.ui.activeTab || "dashboard");
+  setActiveTab(store.state, isDedicatedSessionView() ? "session" : "home");
   refreshAll();
   applyRouteMode();
   syncLoadModeInputs();
@@ -315,14 +315,6 @@ async function boot() {
 }
 
 function bindEvents() {
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      setActiveTab(store.state, tab.dataset.tab);
-      store.queueSave();
-    });
-    tab.addEventListener("keydown", handleTabKeydown);
-  });
-
   document.addEventListener("click", handleDelegatedClick);
   document.addEventListener("change", handleDelegatedChange);
 
@@ -495,6 +487,7 @@ function handleDelegatedChange(event) {
 
 function handleTabKeydown(event) {
   const tabs = [...document.querySelectorAll(".tab")];
+  if (!tabs.length) return;
   const currentIndex = tabs.indexOf(event.currentTarget);
   if (currentIndex < 0) return;
   if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
@@ -523,6 +516,11 @@ function handleAction(action, id, trigger) {
       }
       setActiveTab(store.state, id);
       if (id === "more") renderMoreArea();
+      store.queueSave();
+      break;
+    case "open-session-smart":
+      setActiveTab(store.state, "session");
+      if (store.state.session.active) openDedicatedSessionView();
       store.queueSave();
       break;
     case "open-last-more-section":
@@ -1800,10 +1798,7 @@ function commitFullStateReplacement(nextState, { successMessage }) {
 }
 
 function syncToastOffsetFromBottomNav() {
-  const tabbar = document.querySelector(".tabbar");
-  const isMobile = window.matchMedia?.("(max-width: 760px)")?.matches;
-  const reserved = isMobile ? Math.ceil(tabbar?.getBoundingClientRect?.().height || 0) + 16 : 0;
-  els.toastRegion?.style.setProperty("--tabbar-reserved", `${reserved}px`);
+  els.toastRegion?.style.setProperty("--tabbar-reserved", "0px");
 }
 
 function startRestTimer(seconds) {
