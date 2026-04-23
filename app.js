@@ -83,6 +83,7 @@ const els = {
   exerciseRowTemplate: document.querySelector("#exerciseRowTemplate"),
   routineList: document.querySelector("#routineList"),
   routineSearchInput: document.querySelector("#routineSearchInput"),
+  routineGroupFilter: document.querySelector("#routineGroupFilter"),
   routineDayFilter: document.querySelector("#routineDayFilter"),
   routineFilterSummary: document.querySelector("#routineFilterSummary"),
   cancelRoutineEditBtn: document.querySelector("#cancelRoutineEditBtn"),
@@ -142,6 +143,7 @@ let isSyncingManualWorkoutPanel = false;
 let routineSelectsKey = "";
 let muscleFilterKey = "";
 let routineDayFilterKey = "";
+let routineGroupFilterKey = "";
 let sessionChannel = null;
 let applyingRemoteSync = false;
 const SESSION_CHANNEL_NAME = "gymflow-session-sync-v1";
@@ -394,6 +396,11 @@ function bindEvents() {
   });
   els.routineDayFilter?.addEventListener("change", (event) => {
     store.state.ui.routineDayFilter = event.target.value;
+    renderRoutinesArea();
+    store.queueSave();
+  });
+  els.routineGroupFilter?.addEventListener("change", (event) => {
+    store.state.ui.routineGroupFilter = event.target.value;
     renderRoutinesArea();
     store.queueSave();
   });
@@ -654,10 +661,14 @@ function refreshExerciseOptions() {
 }
 
 function populateRoutineSelects() {
-  const routineOptions = store.state.routines.map((routine) => ({ value: routine.id, label: routine.name }));
-  const nextRoutineKey = routineOptions.map((item) => `${item.value}:${item.label}`).join("|");
+  const routineOptions = store.state.routines.map((routine) => ({
+    value: routine.id,
+    label: routine.name,
+    group: String(routine.routineGroup || "").trim()
+  }));
+  const nextRoutineKey = routineOptions.map((item) => `${item.value}:${item.label}:${item.group}`).join("|");
   if (nextRoutineKey !== routineSelectsKey) {
-    fillSelectWithOptions(els.sessionRoutineSelect, routineOptions, { placeholderLabel: "Selecciona rutina", placeholderValue: "" });
+    fillSessionRoutineSelectByGroup(els.sessionRoutineSelect, routineOptions);
     fillSelectWithOptions(els.workoutRoutineSelect, routineOptions, { placeholderLabel: "Sin rutina", placeholderValue: "" });
     fillSelectWithOptions(els.logRoutineFilter, routineOptions, { placeholderLabel: "Todas las rutinas", placeholderValue: "all" });
     routineSelectsKey = nextRoutineKey;
@@ -671,6 +682,37 @@ function populateRoutineSelects() {
   els.sessionRoutineSelect.value = preferredId || "";
 
   els.logRoutineFilter.value = store.state.ui.logRoutine || "all";
+}
+
+function fillSessionRoutineSelectByGroup(selectEl, options) {
+  if (!selectEl) return;
+  const groupsMap = new Map();
+  options.forEach((option) => {
+    const key = option.group || "";
+    if (!groupsMap.has(key)) groupsMap.set(key, []);
+    groupsMap.get(key).push(option);
+  });
+  const groupNames = [...groupsMap.keys()].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  if (groupsMap.has("")) groupNames.push("");
+  const fragment = document.createDocumentFragment();
+  const placeholder = document.createElement("option");
+  placeholder.value = "";
+  placeholder.textContent = "Selecciona rutina";
+  fragment.appendChild(placeholder);
+  groupNames.forEach((groupName) => {
+    const optgroup = document.createElement("optgroup");
+    optgroup.label = groupName || "Ungrouped";
+    const routines = (groupsMap.get(groupName) || []).sort((a, b) => a.label.localeCompare(b.label));
+    routines.forEach((routine) => {
+      const option = document.createElement("option");
+      option.value = String(routine.value || "");
+      option.textContent = String(routine.label || "");
+      optgroup.appendChild(option);
+    });
+    fragment.appendChild(optgroup);
+  });
+  selectEl.innerHTML = "";
+  selectEl.appendChild(fragment);
 }
 
 function populateLogFilters() {
@@ -722,9 +764,18 @@ function renderRoutinesArea() {
 }
 
 function populateRoutineLibraryFilters() {
-  if (!els.routineSearchInput || !els.routineDayFilter) return;
+  if (!els.routineSearchInput || !els.routineDayFilter || !els.routineGroupFilter) return;
   const days = [...new Set(store.state.routines.map((item) => String(item.day || "").trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  const groups = [...new Set(store.state.routines.map((item) => String(item.routineGroup || "").trim()))]
+    .filter((item, index, arr) => item || arr.indexOf("") === index)
+    .sort((a, b) => {
+      if (!a) return 1;
+      if (!b) return -1;
+      return a.localeCompare(b);
+    });
+  if (!groups.includes("")) groups.push("");
   const nextDayKey = days.join("|");
+  const nextGroupKey = groups.join("|");
   if (nextDayKey !== routineDayFilterKey) {
     fillSelectWithOptions(
       els.routineDayFilter,
@@ -733,11 +784,25 @@ function populateRoutineLibraryFilters() {
     );
     routineDayFilterKey = nextDayKey;
   }
+  if (nextGroupKey !== routineGroupFilterKey) {
+    fillSelectWithOptions(
+      els.routineGroupFilter,
+      groups.map((group) => ({ value: group || "__ungrouped__", label: group || "Ungrouped" })),
+      { placeholderLabel: "All groups", placeholderValue: "all" }
+    );
+    routineGroupFilterKey = nextGroupKey;
+  }
   els.routineSearchInput.value = store.state.ui.routineSearch || "";
   const requestedDayFilter = store.state.ui.routineDayFilter || "all";
+  const requestedGroupFilter = store.state.ui.routineGroupFilter || "all";
   const isValidDayFilter = requestedDayFilter === "all" || days.includes(requestedDayFilter);
+  const isValidGroupFilter = requestedGroupFilter === "all"
+    || requestedGroupFilter === "__ungrouped__"
+    || groups.includes(requestedGroupFilter);
   if (!isValidDayFilter) store.state.ui.routineDayFilter = "all";
+  if (!isValidGroupFilter) store.state.ui.routineGroupFilter = "all";
   els.routineDayFilter.value = isValidDayFilter ? requestedDayFilter : "all";
+  els.routineGroupFilter.value = isValidGroupFilter ? requestedGroupFilter : "all";
 }
 
 function renderLogsArea({ syncSelects = true, syncFilters = true } = {}) {
@@ -1277,6 +1342,7 @@ function saveRoutineFromForm(event) {
     name: routineName,
     day: String(form.get("day") || "").trim(),
     focus: String(form.get("focus") || "").trim(),
+    routineGroup: String(form.get("routineGroup") || "").trim(),
     notes: String(form.get("notes") || "").trim(),
     createdAt: store.state.routines.find((item) => item.id === editingRoutineId)?.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1344,6 +1410,7 @@ function editRoutine(id) {
   els.routineForm.name.value = routine.name;
   els.routineForm.day.value = routine.day || "";
   els.routineForm.focus.value = routine.focus || "";
+  els.routineForm.routineGroup.value = routine.routineGroup || "";
   els.routineForm.notes.value = routine.notes || "";
   els.exerciseRows.innerHTML = "";
   routine.exercises.forEach((exercise) => addExerciseRow(exercise));
@@ -1419,6 +1486,7 @@ function duplicateRoutine(id) {
   clone.name = `${routine.name} copia`;
   clone.createdAt = new Date().toISOString();
   clone.updatedAt = new Date().toISOString();
+  clone.routineGroup = String(routine.routineGroup || "").trim();
   clone.exercises = clone.exercises.map((exercise) => ({ ...exercise, id: uid() }));
   store.state.routines.push(clone);
   store.queueSave();
@@ -1840,6 +1908,7 @@ async function loadDemoData() {
     name: 'Upper Strength',
     day: 'Lunes',
     focus: 'Fuerza torso',
+    routineGroup: 'May Workouts',
     notes: 'Bloque principal',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1854,6 +1923,7 @@ async function loadDemoData() {
     name: 'Lower Power',
     day: 'Jueves',
     focus: 'Pierna',
+    routineGroup: 'May Workouts',
     notes: 'Foco en básicos',
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
@@ -1865,7 +1935,36 @@ async function loadDemoData() {
     ]
   };
   const newState = defaultState();
-  newState.routines = [routineA, routineB];
+  const routineC = {
+    id: uid(),
+    name: 'Pull Technique',
+    day: 'Martes',
+    focus: 'Espalda técnica',
+    routineGroup: 'March Workouts',
+    notes: 'Trabajo técnico',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    exercises: [
+      normalizeRoutineExercise({ id: uid(), block: 'A', name: 'Remo con barra', sets: 4, reps: '8', rest: 90 }),
+      normalizeRoutineExercise({ id: uid(), block: 'B', name: 'Jalón al pecho', sets: 3, reps: '10', rest: 75 })
+    ]
+  };
+  const routineD = {
+    id: uid(),
+    name: 'Upper Volume',
+    day: 'Viernes',
+    focus: 'Hipertrofia torso',
+    routineGroup: 'Hypertrophy Block',
+    notes: 'Series controladas',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    exercises: [
+      normalizeRoutineExercise({ id: uid(), block: 'A1', name: 'Press inclinado mancuernas', sets: 4, reps: '10', rest: 90 }),
+      normalizeRoutineExercise({ id: uid(), block: 'A2', name: 'Remo mancuerna', sets: 4, reps: '10', rest: 90 }),
+      normalizeRoutineExercise({ id: uid(), block: 'B', name: 'Elevaciones laterales', sets: 3, reps: '15', rest: 60 })
+    ]
+  };
+  newState.routines = [routineA, routineB, routineC, routineD];
   const session1 = uid();
   const session2 = uid();
   newState.workouts = [

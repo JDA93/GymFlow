@@ -13,19 +13,25 @@ function hasValue(value) {
 export function renderRoutines(state, els) {
   const search = String(state?.ui?.routineSearch || "").trim().toLowerCase();
   const dayFilter = state?.ui?.routineDayFilter || "all";
+  const groupFilter = state?.ui?.routineGroupFilter || "all";
   const allRoutines = ensureArray(state?.routines);
   const routines = allRoutines.filter((routine) => {
+    const normalizedGroup = String(routine.routineGroup || "").trim();
     const dayMatches = dayFilter === "all" || (routine.day || "") === dayFilter;
+    const groupMatches = groupFilter === "all"
+      || (groupFilter === "__ungrouped__" ? !normalizedGroup : normalizedGroup === groupFilter);
+    if (!groupMatches) return false;
     if (!dayMatches) return false;
     if (!search) return true;
-    const haystack = [routine.name, routine.day, routine.focus, ...(routine.exercises || []).map((item) => item.name)].join(" ").toLowerCase();
+    const haystack = [routine.name, routine.routineGroup, routine.day, routine.focus, ...(routine.exercises || []).map((item) => item.name)].join(" ").toLowerCase();
     return haystack.includes(search);
   });
 
   if (els.routineFilterSummary) {
     const bits = [];
     if (search) bits.push(`búsqueda "${search}"`);
-    if (dayFilter !== "all") bits.push(`bloque ${dayFilter}`);
+    if (groupFilter !== "all") bits.push(`grupo ${groupFilter === "__ungrouped__" ? "Ungrouped" : groupFilter}`);
+    if (dayFilter !== "all") bits.push(`día/bloque ${dayFilter}`);
     els.routineFilterSummary.textContent = bits.length
       ? `${routines.length} rutinas visibles · filtros: ${bits.join(" · ")}.`
       : `${routines.length} rutinas disponibles en biblioteca.`;
@@ -36,7 +42,29 @@ export function renderRoutines(state, els) {
     return;
   }
 
-  els.routineList.innerHTML = routines.map((routine) => {
+  const grouped = new Map();
+  routines.forEach((routine) => {
+    const key = String(routine.routineGroup || "").trim();
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(routine);
+  });
+  const orderedGroups = [...grouped.keys()].sort((a, b) => {
+    if (!a) return 1;
+    if (!b) return -1;
+    return a.localeCompare(b);
+  });
+
+  els.routineList.innerHTML = orderedGroups.map((groupName) => {
+    const label = groupName || "Ungrouped";
+    const items = (grouped.get(groupName) || []).sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")));
+    return `
+      <section class="routine-group-section">
+        <header class="routine-group-header">
+          <h3>${escapeHtml(label)}</h3>
+          <span class="chip ghost">${items.length} rutina${items.length === 1 ? "" : "s"}</span>
+        </header>
+        <div class="list routine-group-list">
+          ${items.map((routine) => {
     const meta = buildRoutineMetadata(state, routine);
     const blockPreview = [...new Set((routine.exercises || []).map((exercise) => exercise.block).filter(Boolean))].slice(0, 4);
     const estimatedMinutes = Math.max(25, Math.round((meta.totalSets * 2.1) + (meta.totalSets * 0.9)));
@@ -50,6 +78,7 @@ export function renderRoutines(state, els) {
           <span class="chip ghost">${meta.lastDate ? `Último ${formatDate(meta.lastDate)}` : "Aún sin usar"}</span>
         </div>
         <div class="chip-row">
+          <span class="chip ghost">${escapeHtml((routine.routineGroup || "").trim() || "Ungrouped")}</span>
           <span class="chip ghost">${meta.exerciseCount} ejercicios</span>
           <span class="chip ghost">${meta.totalSets} series</span>
           <span class="chip ghost">~${estimatedMinutes} min</span>
@@ -73,6 +102,10 @@ export function renderRoutines(state, els) {
           <button class="ghost small" data-action="delete-routine" data-id="${escapeHtml(routine.id)}">Borrar</button>
         </div>
       </article>
+    `;
+  }).join("")}
+        </div>
+      </section>
     `;
   }).join("");
 }

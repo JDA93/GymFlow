@@ -387,6 +387,10 @@
                   </div>
                 </div>
                 <div class="form-field">
+                  <label for="routineGroup">Grupo de rutina</label>
+                  <input id="routineGroup" name="routineGroup" placeholder="Ejercicios Mayo / Hipertrofia / Bloque 1 / Definición" />
+                </div>
+                <div class="form-field">
                   <label for="routineNotes">Notas</label>
                   <textarea id="routineNotes" name="notes" placeholder="Notas de la rutina"></textarea>
                 </div>
@@ -423,6 +427,13 @@
                 <div class="form-field compact-field">
                   <label class="sr-only" for="routineSearchInput">Buscar rutina</label>
                   <input id="routineSearchInput" placeholder="Buscar rutina o ejercicio" />
+                </div>
+                <div class="form-field compact-field">
+                  <label class="sr-only" for="routineGroupFilter">Filtrar por grupo</label>
+                  <select id="routineGroupFilter">
+                    <option value="all">All groups</option>
+                    <option value="__ungrouped__">Ungrouped</option>
+                  </select>
                 </div>
                 <div class="form-field compact-field">
                   <label class="sr-only" for="routineDayFilter">Filtrar por día</label>

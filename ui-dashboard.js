@@ -72,11 +72,12 @@ export function renderHome(state, els) {
     els.homePrimaryCard.dataset.state = "setup";
   } else {
     const sinceLabel = suggestion.daysSince == null ? "Sin sesiones previas" : `${suggestion.daysSince} días desde la última vez`;
+    const routineGroup = String(suggestion.routine.routineGroup || "").trim();
     primaryHtml = `
       <div class="home-primary-top">
         <span class="home-eyebrow">Siguiente mejor acción</span>
         <h3>Entrena ${escapeHtml(suggestion.routine.name)}</h3>
-        <p>${escapeHtml(suggestion.reason)} · ${escapeHtml(sinceLabel)}.</p>
+        <p>${escapeHtml(suggestion.reason)} · ${escapeHtml(sinceLabel)}.${routineGroup ? ` · ${escapeHtml(routineGroup)}` : ""}</p>
       </div>
       <div class="home-primary-actions">
         <button type="button" data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Iniciar rutina recomendada</button>
@@ -230,12 +231,13 @@ function renderPrimaryAction(state, els) {
   }
 
   const lastLabel = suggestion.daysSince == null ? "Aún sin uso" : relativeDaysLabel(suggestion.daysSince);
+  const routineGroup = String(suggestion.routine.routineGroup || "").trim();
   els.dashboardPrimaryCard.innerHTML = `
     <div class="hero-copy">
       <span class="pill">Recomendación</span>
       <h2>Entrena ${escapeHtml(suggestion.routine.name)} ahora</h2>
       <p class="today-insight">${buildTodayInsight(state, suggestion)}</p>
-      <p>${suggestion.reason} ${lastLabel}.</p>
+      <p>${suggestion.reason} ${lastLabel}.${routineGroup ? ` · ${escapeHtml(routineGroup)}` : ""}</p>
     </div>
     <div class="hero-actions hero-actions--stack-mobile">
       <button id="dashboardPrimaryCta" data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Empezar rutina recomendada</button>
@@ -255,9 +257,10 @@ function renderLauncher(state, els) {
       footer: `<button data-action="continue-session">Ir a sesión</button>`
     }));
   } else if (suggestion.routine) {
+    const routineGroup = String(suggestion.routine.routineGroup || "").trim();
     cards.push(cardHtml({
       title: `Arrancar ${suggestion.routine.name}`,
-      subtitle: suggestion.reason,
+      subtitle: `${suggestion.reason}${routineGroup ? ` · ${routineGroup}` : ""}`,
       chips: [{ label: suggestion.daysSince == null ? "Nueva" : `${suggestion.daysSince} días`, type: "ghost" }],
       footer: `<button data-action="start-routine" data-id="${escapeHtml(suggestion.routine.id)}">Empezar</button>`
     }));
